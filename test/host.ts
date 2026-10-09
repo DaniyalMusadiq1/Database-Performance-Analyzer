@@ -22,6 +22,9 @@ export async function run() {
     'dbPerf.manage',
   ])
     assert.ok(commands.includes(c), `${c} registered`);
+  await vscode.commands.executeCommand('dbPerf.connections.focus');
+  await vscode.commands.executeCommand('dbPerf.open');
+  assert.ok(api.hasDashboard(), 'Dashboard opens directly from its sidebar command');
   await vscode.commands.executeCommand('dbPerf.demo');
   assert.ok(api.hasDashboard(), 'Demo dashboard created');
   assert.equal(typeof api.profileCount(), 'number');

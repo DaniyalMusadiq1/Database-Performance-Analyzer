@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0
+
+- Add permanent sidebar shortcuts for dashboard, connection setup, project detection and demo.
+- Add a sidebar title button for opening the dashboard and rename the view to Dashboard & connections.
+- Activate after startup so the DB Performance status-bar shortcut is available without opening the Command Palette.
+- Add a one-time welcome notification with Open Dashboard and Try Demo actions.
+- Add optional dashboard home-screen opening on startup without connecting or starting monitoring.
+- Keep VS Code 1.71.2 core-engine compatibility.
+
 ## 1.4.0
 
 - Support installation on VS Code 1.71.2 with PostgreSQL, MySQL/MariaDB, SQLite and demo.

@@ -35,7 +35,43 @@ class ConnectionTree implements vscode.TreeDataProvider<vscode.TreeItem> {
     return item;
   }
   getChildren() {
-    return this.getProfiles().map((p) => {
+    const actions = [
+      {
+        label: 'Open dashboard',
+        command: 'dbPerf.open',
+        icon: 'dashboard',
+        tooltip: 'Open your performance dashboard without the Command Palette.',
+      },
+      {
+        label: 'Add a connection',
+        command: 'dbPerf.add',
+        icon: 'add',
+        tooltip:
+          'Choose guided setup, local defaults, a URL, project detection or a SQLite file. Requires workspace trust.',
+      },
+      {
+        label: 'Detect project databases',
+        command: 'dbPerf.detect',
+        icon: 'search',
+        tooltip:
+          'Find database configuration and models in this project. Requires workspace trust.',
+      },
+      {
+        label: 'Explore demo',
+        command: 'dbPerf.demo',
+        icon: 'beaker',
+        tooltip: 'Try the dashboard with synthetic data; no database or workspace trust is needed.',
+      },
+    ].map((action) => {
+      const item = new vscode.TreeItem(action.label);
+      item.id = action.command;
+      item.contextValue = 'dashboardAction';
+      item.iconPath = new vscode.ThemeIcon(action.icon);
+      item.tooltip = action.tooltip;
+      item.command = { command: action.command, title: action.label };
+      return item;
+    });
+    const connections = this.getProfiles().map((p) => {
       const item = new vscode.TreeItem(p.name);
       item.id = p.id;
       item.description = p.engine;
@@ -45,6 +81,7 @@ class ConnectionTree implements vscode.TreeDataProvider<vscode.TreeItem> {
       item.command = { command: 'dbPerf.open', title: 'Open Dashboard', arguments: [p.id] };
       return item;
     });
+    return [...actions, ...connections];
   }
 }
 export function activate(context: vscode.ExtensionContext) {
@@ -983,6 +1020,31 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
   );
+  // Opening the home screen never auto-selects a profile or connects to a database.
+  if (vscode.workspace.getConfiguration('dbPerf').get<boolean>('openDashboardOnStartup', false)) {
+    void open().catch((error) => {
+      if (!disposed) output.appendLine(redactError(error));
+    });
+  }
+  if (!context.globalState.get<boolean>('welcomeShown', false)) {
+    void context.globalState
+      .update('welcomeShown', true)
+      .then(async () => {
+        if (disposed) return;
+        const choice = await vscode.window.showInformationMessage(
+          'Database Performance Analyzer is ready. Open it any time from the database icon in the left sidebar or DB Performance in the bottom status bar.',
+          'Open Dashboard',
+          'Try Demo',
+          'Not now',
+        );
+        if (disposed) return;
+        if (choice === 'Open Dashboard') await open();
+        else if (choice === 'Try Demo') await open('demo');
+      })
+      .then(undefined, (error) => {
+        if (!disposed) output.appendLine(redactError(error));
+      });
+  }
   // Diagnostics below are consumed only by the extension-host smoke test; no credentials are exposed.
   return { profileCount: () => profiles.length, hasDashboard: () => !!panel };
 }

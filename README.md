@@ -8,8 +8,8 @@ Requires VS Code 1.101 or later (Node 22 extension host).
 
 ## Start in a minute
 
-1. Install the VSIX with **Extensions → ⋯ → Install from VSIX…**, or run `code --install-extension database-performance-analyzer-1.4.0.vsix`.
-2. Open **Database Performance** in the activity bar.
+1. Install the VSIX with **Extensions → ⋯ → Install from VSIX…**, or run `code --install-extension database-performance-analyzer-1.5.0.vsix`.
+2. Click the **database icon** in the left activity bar, then **Open dashboard**. You can also click **DB Performance** in the bottom status bar.
 3. Choose **Explore Demo**, **Detect Project Databases**, or **Add Connection**.
 4. Choose **Local database defaults**, **Guided connection setup**, **Detect from this project**, **Paste a connection URL**, or **Open a SQLite database file**. Name the connection and choose transport security. Guided setup safely encodes special characters in credentials.
 5. Refresh once or enable monitoring. Review collection notices before interpreting missing metrics.
@@ -135,3 +135,9 @@ The extension now compiles against the VS Code 1.71 API and builds for Node 16.1
 **Local database defaults** skips host and port entry. Guided setup has Back buttons, individual validation and field explanations. **Manage connection → Edit connection fields** lets you change host, port, database and username; leaving the password blank keeps the stored password. Connection URL options are preserved. Use **Update connection URL** for MongoDB SRV/cluster URLs or to remove an existing password. Changes save securely and refresh the selected connection automatically.
 
 Hover over dashboard controls for tooltips, or expand **Connection guide & troubleshooting** for examples and advice.
+
+### Open without the Command Palette
+
+After first installation, a welcome notification offers **Open Dashboard** or **Try Demo**. The database icon in the left activity bar opens **Dashboard & connections**, which always has dashboard, add, detect and demo shortcuts, even before any connection is saved. There is also a dashboard button in the sidebar title and a **DB Performance** shortcut in the bottom status bar.
+
+Enable **Database Performance › Open Dashboard On Startup** in Settings to show the dashboard home screen on every launch. This is optional and does not open a database connection or start monitoring.
