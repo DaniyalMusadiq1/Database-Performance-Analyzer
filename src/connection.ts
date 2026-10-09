@@ -37,3 +37,47 @@ export function buildConnectionUri(
   validateUri(uri, engine);
   return uri;
 }
+/** Guided editing preserves URL options and secure Redis schemes; cluster/SRV URLs use the URL editor. */
+export function connectionFields(uri: string) {
+  const engine = detectNetworkEngine(uri);
+  if (engine === 'mongodb' && /,/.test(uri.split('?')[0]))
+    throw new Error('Use Update connection URL for a multiple-host MongoDB cluster.');
+  const url = new URL(uri);
+  if (url.protocol === 'mongodb+srv:' || url.hostname.includes(','))
+    throw new Error(
+      'Use Update connection URL for MongoDB SRV or multiple hosts so cluster options are preserved.',
+    );
+  return {
+    engine,
+    host: url.hostname,
+    port: url.port || String(connectionDefaults[engine].port),
+    database: decodeURIComponent(url.pathname.slice(1)),
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+  };
+}
+function detectNetworkEngine(uri: string): NetworkEngine {
+  const scheme = new URL(uri).protocol;
+  const engine =
+    scheme === 'postgres:' || scheme === 'postgresql:'
+      ? 'postgres'
+      : scheme === 'mysql:' || scheme === 'mariadb:'
+        ? 'mysql'
+        : scheme === 'mssql:' || scheme === 'sqlserver:'
+          ? 'sqlserver'
+          : scheme === 'mongodb:' || scheme === 'mongodb+srv:'
+            ? 'mongodb'
+            : scheme === 'redis:' || scheme === 'rediss:'
+              ? 'redis'
+              : undefined;
+  if (!engine) throw new Error('This is a file connection; use the file picker instead.');
+  return engine;
+}
+export function preserveConnectionOptions(original: string, updated: string): string {
+  const old = new URL(original),
+    next = new URL(updated);
+  next.search = old.search;
+  if (old.protocol === 'rediss:') next.protocol = 'rediss:';
+  validateUri(next.toString());
+  return next.toString();
+}

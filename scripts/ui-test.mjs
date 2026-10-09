@@ -266,6 +266,39 @@ try {
   assert.ok(await page.evaluate(() => window.sent.some((m) => m.type === 'manage')));
   await page.click('#settings');
   assert.ok(await page.evaluate(() => window.sent.some((m) => m.type === 'settings')));
+  assert.ok((await page.locator('#add').getAttribute('title')).includes('guided'));
+  assert.ok((await page.locator('#manage').getAttribute('title')).includes('Edit individual'));
+  await page.locator('.connection-help summary').click();
+  assert.ok((await page.locator('.connection-help').innerText()).includes('empty password keeps'));
+  await page.evaluate(
+    (profiles) =>
+      window.postMessage(
+        {
+          type: 'profiles',
+          profiles: [
+            ...profiles,
+            {
+              id: 'legacy-mongo',
+              name: 'Mongo',
+              engine: 'mongodb',
+              unavailable: 'Update VS Code to use MongoDB.',
+            },
+          ],
+          selected: 'legacy-mongo',
+          trusted: true,
+          runtimeNode: '16.14.2',
+        },
+        '*',
+      ),
+    profiles,
+  );
+  assert.ok(await page.locator('#compatibility-notice').isVisible());
+  assert.ok(await page.locator('#refresh').isDisabled());
+  assert.ok(await page.locator('#live').isDisabled());
+  assert.ok(
+    await page.locator('#manage').isEnabled(),
+    'Existing unavailable connections can still be edited',
+  );
   assert.deepEqual(errors, []);
   console.log(
     'Dashboard passed: setup, demo, tabs, filtering, SQL actions, injection protection, stale-state clearing and responsive layout.',

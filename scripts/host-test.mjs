@@ -8,9 +8,10 @@ await build({
   platform: 'node',
   format: 'cjs',
   external: ['vscode'],
-  target: 'node20',
+  target: 'node16.14',
 });
 await runTests({
+  ...(process.env.DBPERF_VSCODE_VERSION ? { version: process.env.DBPERF_VSCODE_VERSION } : {}),
   ...(process.env.DBPERF_VSCODE_EXECUTABLE
     ? { vscodeExecutablePath: process.env.DBPERF_VSCODE_EXECUTABLE }
     : {}),

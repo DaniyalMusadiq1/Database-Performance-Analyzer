@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
+import { serialize, deserialize } from 'node:v8';
+import { runtimeIssue } from './compatibility';
 import { collect, explain } from './adapters';
 import { Profile, Options, Snapshot } from './types';
 import { detectEngine, redactError, targetOf, validateUri, validateSql } from './security';
@@ -12,7 +14,13 @@ import { SnapshotHistory, chartHistory } from './history';
 import { CancelledError, throwIfAborted } from './lifecycle';
 import { loadProfiles, SerialQueue } from './profiles';
 import { settingNumber } from './settings';
-import { buildConnectionUri, connectionDefaults, NetworkEngine } from './connection';
+import {
+  buildConnectionUri,
+  connectionDefaults,
+  NetworkEngine,
+  connectionFields,
+  preserveConnectionOptions,
+} from './connection';
 class ConnectionTree implements vscode.TreeDataProvider<vscode.TreeItem> {
   private changed = new vscode.EventEmitter<vscode.TreeItem | undefined>();
   onDidChangeTreeData = this.changed.event;
@@ -102,12 +110,14 @@ export function activate(context: vscode.ExtensionContext) {
         engine: p.engine,
         target: p.target,
         tls: p.tls,
+        unavailable: runtimeIssue(p.engine),
       })),
       selected,
       reset,
       trusted: vscode.workspace.isTrusted,
       slowQueryMs: options().slowQueryMs,
       intervalSeconds: monitoringSeconds(),
+      runtimeNode: process.versions.node,
     });
   const options = (): Options => {
     const c = vscode.workspace.getConfiguration('dbPerf');
@@ -300,7 +310,7 @@ export function activate(context: vscode.ExtensionContext) {
                 break;
               case 'baseline':
                 if (current) {
-                  baseline = structuredClone(current);
+                  baseline = deserialize(serialize(current)) as Snapshot;
                   post({ type: 'comparison', comparison: compareSnapshots(baseline, current) });
                 }
                 break;
@@ -365,9 +375,20 @@ export function activate(context: vscode.ExtensionContext) {
   }
   async function add(seed?: string) {
     trust();
+    let prepared = false;
     if (!seed) {
       const method = await vscode.window.showQuickPick(
         [
+          {
+            label: 'Local database defaults',
+            description: 'localhost and the standard port are filled in',
+            mode: 'local',
+          },
+          {
+            label: 'Detect from this project',
+            description: 'Find URLs in environment and ORM configuration files',
+            mode: 'detect',
+          },
           {
             label: 'Guided connection setup',
             description: 'Choose an engine and enter individual fields',
@@ -387,6 +408,7 @@ export function activate(context: vscode.ExtensionContext) {
         { title: 'Add database connection', ignoreFocusOut: true },
       );
       if (!method) return;
+      if (method.mode === 'detect') return detect();
       if (method.mode === 'sqlite') {
         const files = await vscode.window.showOpenDialog({
           canSelectMany: false,
@@ -398,33 +420,39 @@ export function activate(context: vscode.ExtensionContext) {
         if (files[0].scheme !== 'file')
           throw new Error('Choose a local SQLite file on the workspace host.');
         seed = files[0].toString();
-      } else if (method.mode === 'guided') {
-        seed = await guidedConnection();
+        prepared = true;
+      } else if (method.mode === 'guided' || method.mode === 'local') {
+        seed = await guidedConnection(undefined, method.mode === 'local');
+        prepared = true;
         if (!seed) return;
       }
     }
-    const uri = await vscode.window.showInputBox({
-      title: 'Add database · 1/3',
-      prompt:
-        'Connection URL (saved securely in VS Code SecretStorage). Engine is detected from the URL.',
-      password: true,
-      value: seed,
-      placeHolder: 'postgresql://user:password@localhost:5432/database',
-      ignoreFocusOut: true,
-      validateInput: (value) => {
-        try {
-          validateUri(value);
-          return undefined;
-        } catch (e) {
-          return (e as Error).message;
-        }
-      },
-    });
+    const uri = prepared
+      ? seed
+      : await vscode.window.showInputBox({
+          title: 'Review database connection URL',
+          prompt:
+            'Connection URL (saved securely in VS Code SecretStorage). Engine is detected from the URL.',
+          password: true,
+          value: seed,
+          placeHolder: 'postgresql://user:password@localhost:5432/database',
+          ignoreFocusOut: true,
+          validateInput: (value) => {
+            try {
+              validateUri(value);
+              return undefined;
+            } catch (e) {
+              return (e as Error).message;
+            }
+          },
+        });
     if (!uri) return;
     const engine = detectEngine(uri);
+    const issue = runtimeIssue(engine);
+    if (issue) throw new Error(issue);
     const name = await vscode.window.showInputBox({
-      title: 'Add database · 2/3',
-      prompt: `Name for this ${engine} connection`,
+      title: 'Name this connection',
+      prompt: `Choose a recognizable name, e.g. Local development or Production read-only. Target: ${targetOf(uri)}`,
       value: `${engine} · ${targetOf(uri)}`,
       validateInput: (v) =>
         !v.trim() ? 'Enter a name.' : v.length > 100 ? 'Use at most 100 characters.' : undefined,
@@ -447,8 +475,9 @@ export function activate(context: vscode.ExtensionContext) {
           },
         ],
         {
-          title: 'Add database · 3/3',
-          placeHolder: 'Choose transport security',
+          title: 'Choose connection security',
+          placeHolder:
+            'Choose Verified TLS for remote/cloud databases; Plaintext only for local development or a trusted tunnel.',
           ignoreFocusOut: true,
         },
       );
@@ -478,46 +507,147 @@ export function activate(context: vscode.ExtensionContext) {
     });
     await open(p.id);
   }
-  async function guidedConnection(): Promise<string | undefined> {
-    const picked = await vscode.window.showQuickPick(
-      (Object.keys(connectionDefaults) as NetworkEngine[]).map((engine) => ({
-        label: engine,
-        engine,
-      })),
-      { title: 'Choose database engine', ignoreFocusOut: true },
-    );
+  async function inputStep(
+    title: string,
+    step: number,
+    total: number,
+    prompt: string,
+    value: string,
+    password: boolean,
+    validate: (value: string) => string | undefined,
+  ): Promise<string | { back: true } | undefined> {
+    return new Promise((resolve) => {
+      const input = vscode.window.createInputBox();
+      input.title = title;
+      input.step = step;
+      input.totalSteps = total;
+      input.prompt = prompt;
+      input.value = value;
+      input.password = password;
+      input.ignoreFocusOut = true;
+      input.buttons = step > 1 ? [vscode.QuickInputButtons.Back] : [];
+      input.placeholder = password
+        ? 'Never stored in project files or sent to the dashboard'
+        : prompt;
+      let settled = false;
+      const handlers: vscode.Disposable[] = [];
+      const finish = (result: string | { back: true } | undefined) => {
+        if (settled) return;
+        settled = true;
+        handlers.forEach((h) => h.dispose());
+        input.dispose();
+        resolve(result);
+      };
+      handlers.push(
+        input.onDidAccept(() => {
+          const error = validate(input.value);
+          input.validationMessage = error;
+          if (!error) finish(input.value);
+        }),
+      );
+      handlers.push(
+        input.onDidChangeValue((value) => {
+          input.validationMessage = validate(value);
+        }),
+      );
+      handlers.push(input.onDidTriggerButton(() => finish({ back: true })));
+      handlers.push(input.onDidHide(() => finish(undefined)));
+      input.show();
+    });
+  }
+  async function guidedConnection(original?: string, local = false): Promise<string | undefined> {
+    const existing = original ? connectionFields(original) : undefined;
+    const picked = existing
+      ? { engine: existing.engine }
+      : await vscode.window.showQuickPick(
+          (Object.keys(connectionDefaults) as NetworkEngine[])
+            .filter((engine) => !runtimeIssue(engine))
+            .map((engine) => ({
+              label: engine,
+              description: `Default port ${connectionDefaults[engine].port}`,
+              engine,
+            })),
+          {
+            title: 'Choose database engine',
+            placeHolder: 'MariaDB uses MySQL. Cloud/SRV URLs use Paste a connection URL.',
+            ignoreFocusOut: true,
+          },
+        );
     if (!picked) return;
     const engine = picked.engine,
       defaults = connectionDefaults[engine];
-    const fields: { label: string; value?: string; password?: boolean }[] = [
-      { label: 'Hostname or IP address', value: 'localhost' },
-      { label: 'Port', value: String(defaults.port) },
-      { label: engine === 'redis' ? 'Database index' : 'Database name', value: defaults.database },
-      { label: 'Username (leave empty if not required)' },
-      { label: 'Password (leave empty if not required)', password: true },
+    const fields = [
+      {
+        label:
+          'Host only: localhost, a server name, or an IP address. Under Remote SSH this refers to the remote host.',
+        value: existing?.host || 'localhost',
+        password: false,
+      },
+      {
+        label: `Port: standard ${engine} port is ${defaults.port}. Enter a custom port if your server uses one.`,
+        value: existing?.port || String(defaults.port),
+        password: false,
+      },
+      {
+        label:
+          engine === 'redis'
+            ? 'Database index: usually 0; this must be a nonnegative integer.'
+            : 'Database name: use the database your application connects to.',
+        value: existing?.database ?? defaults.database,
+        password: false,
+      },
+      {
+        label:
+          'Username: use a read-only account where possible. Leave empty only if authentication does not require it.',
+        value: existing?.user || '',
+        password: false,
+      },
+      {
+        label: existing
+          ? 'Password: leave empty to keep the saved password, or type a replacement. Use the URL editor to remove a saved password.'
+          : 'Password: special characters are encoded automatically. Leave empty if authentication does not require it.',
+        value: '',
+        password: true,
+      },
     ];
-    const values: string[] = [];
-    for (const [i, field] of fields.entries()) {
-      const value = await vscode.window.showInputBox({
-        title: `${engine} setup · ${i + 1}/${fields.length}`,
-        prompt: field.label,
-        value: field.value,
-        password: field.password,
-        ignoreFocusOut: true,
-        validateInput: (value) => {
+    const values: string[] = fields.map((f) => f.value);
+    const start = local ? 2 : 0;
+    for (let i = start; i < fields.length;) {
+      const field = fields[i];
+      const result = await inputStep(
+        `${existing ? 'Edit' : 'Connect'} ${engine}`,
+        i - start + 1,
+        fields.length - start,
+        field.label,
+        values[i],
+        field.password,
+        (value) => {
           if (i === 0 && (!value.trim() || /[\s/@?#]/.test(value)))
-            return 'Enter only a hostname or IP address.';
+            return 'Enter only a hostname or IP address, without a URL or port.';
           if (i === 1 && (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535))
             return 'Enter a port between 1 and 65535.';
           if (i === 2 && engine === 'redis' && !/^\d+$/.test(value))
             return 'Enter a nonnegative database index.';
           return undefined;
         },
-      });
-      if (value === undefined) return;
-      values.push(value);
+      );
+      if (result === undefined) return;
+      if (typeof result !== 'string') {
+        i = Math.max(start, i - 1);
+        continue;
+      }
+      values[i] = result;
+      i++;
     }
-    return buildConnectionUri(engine, values[0], values[1], values[2], values[3], values[4]);
+    const uri = buildConnectionUri(
+      engine,
+      values[0],
+      values[1],
+      values[2],
+      values[3],
+      values[4] || existing?.password || '',
+    );
+    return original ? preserveConnectionOptions(original, uri) : uri;
   }
   async function manage() {
     trust();
@@ -525,11 +655,34 @@ export function activate(context: vscode.ExtensionContext) {
     const p = profiles.find((p) => p.id === selected);
     if (!p) throw new Error('Select a saved database connection first.');
     const action = await vscode.window.showQuickPick(
-      ['Rename', 'Update connection URL', 'Change transport security', 'Remove connection'],
+      [
+        'Edit connection fields',
+        'Rename',
+        'Update connection URL',
+        'Change transport security',
+        'Remove connection',
+      ],
       { title: `Manage ${p.name}` },
     );
     const item = new vscode.TreeItem(p.name);
     item.id = p.id;
+    if (action === 'Edit connection fields') {
+      const original = await context.secrets.get('dbPerf.uri.' + p.id);
+      if (!original) throw new Error('Saved URL is missing. Use Update connection URL.');
+      if (p.engine === 'sqlite') {
+        const files = await vscode.window.showOpenDialog({
+          canSelectMany: false,
+          canSelectFiles: true,
+          canSelectFolders: false,
+          openLabel: 'Replace database file',
+        });
+        if (files?.[0]) await updateUrl(item, files[0].toString());
+      } else {
+        const updated = await guidedConnection(original);
+        if (updated) await updateUrl(item, updated);
+      }
+      return;
+    }
     if (action === 'Update connection URL') return updateUrl(item);
     if (action === 'Remove connection') return remove(item);
     let name = p.name,
@@ -656,7 +809,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
   async function exportReport() {
     if (!current) throw new Error('Refresh a connection before exporting.');
-    const snapshot = structuredClone(current);
+    const snapshot = deserialize(serialize(current)) as Snapshot;
     const f = await vscode.window.showQuickPick(
       [
         { label: 'Markdown report', ext: 'md', format: 'markdown' as const },
@@ -722,25 +875,30 @@ export function activate(context: vscode.ExtensionContext) {
       sendProfiles();
     });
   }
-  async function updateUrl(item?: vscode.TreeItem) {
+  async function updateUrl(item?: vscode.TreeItem, preparedUri?: string) {
     trust();
     const p = profiles.find((p) => p.id === (item?.id ?? selected));
     if (!p) return;
     if (busy) throw new Error('Cancel the current operation before updating credentials.');
-    const uri = await vscode.window.showInputBox({
-      title: 'Update connection URL',
-      password: true,
-      prompt: `Enter a ${p.engine} URL. The existing secret is never displayed.`,
-      validateInput: (v) => {
-        try {
-          validateUri(v);
-          if (detectEngine(v) !== p.engine) return 'Use the same engine or add a new connection.';
-        } catch (e) {
-          return (e as Error).message;
-        }
-      },
-    });
+    const uri =
+      preparedUri ||
+      (await vscode.window.showInputBox({
+        title: 'Update connection URL',
+        password: true,
+        prompt: `Enter a ${p.engine} URL. The existing secret is never displayed.`,
+        validateInput: (v) => {
+          try {
+            validateUri(v);
+            if (detectEngine(v) !== p.engine) return 'Use the same engine or add a new connection.';
+          } catch (e) {
+            return (e as Error).message;
+          }
+        },
+      }));
     if (!uri) return;
+    validateUri(uri);
+    if (detectEngine(uri) !== p.engine)
+      throw new Error('Use the same engine or add a new connection.');
     if ((/^rediss:/i.test(uri) || /^mongodb\+srv:/i.test(uri)) && !p.tls)
       throw new Error('This URL requires verified TLS. Add a new connection with TLS enabled.');
     await profileChanges.run(async () => {
@@ -768,6 +926,7 @@ export function activate(context: vscode.ExtensionContext) {
       tree.refresh();
       sendProfiles(true);
     });
+    if (selected === p.id) await refresh();
   }
   const register = (id: string, fn: (...args: any[]) => unknown) =>
     context.subscriptions.push(

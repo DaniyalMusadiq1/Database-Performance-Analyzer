@@ -1,8 +1,6 @@
 import { Client } from 'pg';
 import mysql, { Connection as MyConnection } from 'mysql2/promise';
-import mssql from 'mssql';
-import { MongoClient } from 'mongodb';
-import { createClient } from 'redis';
+import { requireRuntime } from './compatibility';
 import { sqliteQueries } from './sqlite';
 import { deadline, throwIfAborted, isInterrupted, acquireResource } from './lifecycle';
 import { Profile, Snapshot, Options, Plan } from './types';
@@ -139,6 +137,9 @@ async function msSession<T>(
   o: Options,
   work: (q: (sql: string) => Promise<Row[]>) => Promise<T>,
 ): Promise<T> {
+  requireRuntime('sqlserver');
+  const { default: mssql } = await import('mssql');
+  throwIfAborted(o.signal);
   const u = new URL(uri);
   const pool = new mssql.ConnectionPool({
     server: networkHostname(uri),
@@ -532,6 +533,9 @@ export async function collect(p: Profile, uri: string, o: Options): Promise<Snap
       'Read-only in-memory copy. Table row counts, usage counters and live sessions are not collected. Active WAL files are rejected; inspect a consistent backup.',
     );
   } else if (p.engine === 'mongodb') {
+    requireRuntime('mongodb');
+    const { MongoClient } = await import('mongodb');
+    throwIfAborted(o.signal);
     const c = new MongoClient(uri, {
       serverSelectionTimeoutMS: o.timeoutMs,
       connectTimeoutMS: o.timeoutMs,
@@ -667,6 +671,9 @@ export async function collect(p: Profile, uri: string, o: Options): Promise<Snap
       await c.close().catch(() => {});
     }
   } else if (p.engine === 'redis') {
+    requireRuntime('redis');
+    const { createClient } = await import('redis');
+    throwIfAborted(o.signal);
     const c = createClient({
       url: redisTransportUri(uri, p.tls),
       socket: {

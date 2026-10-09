@@ -539,3 +539,22 @@ footer {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+
+.connection-help {
+  margin: 24px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.connection-help summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.connection-help li {
+  margin: 12px 0;
+  line-height: 1.6;
+}
+.connection-help code {
+  overflow-wrap: anywhere;
+}

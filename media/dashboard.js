@@ -16,6 +16,42 @@
     slowQueryMs = 100,
     ascending = false,
     refreshFailed = false;
+  const tips = {
+    add: 'Choose local defaults, guided setup, project detection, a connection URL or a SQLite file.',
+    'welcome-add': 'Start with a guided connection. Credentials are saved securely in VS Code.',
+    detect: 'Inspect environment and ORM files without executing project code.',
+    'project-detect': 'Find supported database URLs, frameworks and models in this workspace.',
+    manage: 'Edit individual fields, rename, update URL, change TLS or remove this connection.',
+    refresh: 'Collect a new read-only diagnostic snapshot from the selected database.',
+    retry: 'Try collecting diagnostics again after checking connection settings.',
+    live: 'Automatically refresh while this dashboard is visible. Stop pauses future refreshes.',
+    interval:
+      'Choose how often live monitoring collects a new snapshot. This updates your VS Code setting.',
+    cancel: 'Stop monitoring and cancel the current database operation.',
+    export:
+      'Save Markdown, JSON or CSV locally; query text is omitted unless you choose to include it.',
+    baseline: 'Save these cumulative query counters to compare with a later refresh.',
+    'clear-baseline': 'Remove the local comparison baseline without resetting database statistics.',
+    'clear-history':
+      'Remove local chart history for this connection; server statistics are unchanged.',
+    explain:
+      'Inspect an estimated SELECT query plan. Replace parameter placeholders with literals.',
+    analyze:
+      'PostgreSQL only: execute SELECT after explicit confirmation. This can create database load.',
+    settings: 'Adjust timeouts, the slow-query threshold, monitoring interval and history limits.',
+    'query-sort': 'Choose which query counter to sort by.',
+    'sort-direction': 'Switch between highest-first and lowest-first query order.',
+    'slow-only':
+      'Show patterns with mean latency at or above your configured slow-query threshold.',
+    'finding-filter': 'Limit advisory findings to a severity.',
+    'trend-metric': 'Choose a metric from your locally captured history.',
+    connection: 'Select a saved connection; changing it clears old results before refreshing.',
+    sql: 'Enter one trusted SELECT. Use representative values instead of $1 or ? placeholders.',
+  };
+  for (const [id, tip] of Object.entries(tips)) $(id).title = tip;
+  for (const id of ['query', 'session', 'table', 'index'])
+    $(id + '-filter').title =
+      'Search the available records. Clearing the field shows all records again.';
   const tableData = new Map();
   const state = vscode.getState() || {};
   const send = (type, extra = {}) => vscode.postMessage({ type, ...extra });
@@ -170,10 +206,14 @@
       $(id).disabled = busy || !trusted;
     $('manage').disabled = busy || !trusted || !selected || selected.engine === 'demo';
     for (const id of ['refresh', 'retry', 'live'])
-      $(id).disabled = busy || !selected || (!trusted && selected.engine !== 'demo');
+      $(id).disabled =
+        busy || !selected || !!selected?.unavailable || (!trusted && selected.engine !== 'demo');
     for (const id of ['baseline', 'export', 'clear-history']) $(id).disabled = busy || !snapshot;
     $('live').disabled =
-      !selected || (!trusted && selected.engine !== 'demo') || (busy && !monitoring);
+      !selected ||
+      !!selected?.unavailable ||
+      (!trusted && selected.engine !== 'demo') ||
+      (busy && !monitoring);
     $('clear-baseline').disabled = busy || baseline === null;
     $('analyze').disabled = busy || !trusted || snapshot?.engine !== 'postgres';
     $('explain').disabled =
@@ -352,10 +392,10 @@
       `${label || 'Metric'} · ${values.length} local samples · oldest to newest`;
     if (values.length < 2) {
       $('trend-stats').textContent = 'Refresh or start monitoring to plot history.';
-      svg.hidden = true;
+      svg.setAttribute('hidden', '');
       return;
     }
-    svg.hidden = false;
+    svg.removeAttribute('hidden');
     const format = (v) =>
       metric?.unit === 'bytes' ? bytes(v) : fmt(v) + (metric?.unit ? ' ' + metric.unit : '');
     const min = Math.min(...values),
@@ -480,6 +520,10 @@
         $('interval').value = String(intervalSeconds);
       }
       $('trust-notice').hidden = trusted;
+      const major = Number(String(m.runtimeNode || '22').split('.')[0]);
+      $('compatibility-notice').hidden = major >= 22;
+      $('compatibility-notice').textContent =
+        'Older VS Code runtime: PostgreSQL, MySQL/MariaDB, SQLite and demo are available. Some engines require an update to VS Code 1.101 or newer.';
       const selected = m.selected;
       if (shownId !== selected || m.reset) {
         shownId = selected;
@@ -524,7 +568,8 @@
       for (const p of profiles) {
         const opt = el('option', p.name + ' · ' + p.engine);
         opt.value = p.id;
-        opt.title = p.target || '';
+        opt.title = p.unavailable || p.target || '';
+        if (p.unavailable) opt.textContent += ' · update VS Code required';
         $('connection').append(opt);
       }
       $('connection').value = selected || '';
@@ -532,6 +577,10 @@
       $('connection-detail').textContent = profile
         ? `${profile.name} · ${profile.target || ''} · ${profile.engine === 'demo' ? 'Sample data only' : profile.engine === 'sqlite' ? 'Local snapshot' : profile.tls ? 'Verified TLS' : 'Plaintext connection'}`
         : 'Choose a connection or explore the demo to get started.';
+      if (profile?.unavailable) {
+        $('compatibility-notice').hidden = false;
+        $('compatibility-notice').textContent = profile.unavailable;
+      }
       syncControls();
       if (snapshot) renderQueries();
       renderMonitoringStatus();

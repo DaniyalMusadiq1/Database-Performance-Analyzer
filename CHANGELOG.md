@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.0
+
+- Support installation on VS Code 1.71.2 with PostgreSQL, MySQL/MariaDB, SQLite and demo.
+- Compile against the 1.71 API, add explicit command activation events, target Node 16.14 and use compatible snapshot cloning.
+- Lazy-load modern MongoDB, Redis and SQL Server drivers; guard their runtime requirements and explain upgrade requirements in the dashboard.
+- Add local database defaults and direct project detection to the connection chooser.
+- Add guided setup with Back buttons, per-field validation and explanatory prompts.
+- Add guided editing of saved connection fields with retained passwords, preserved URL options and automatic refresh after updates.
+- Add dashboard tooltips, connection examples and a troubleshooting guide.
+- Test activation, SQLite collection/query plans and unsupported-engine guards on actual VS Code 1.71.2; add legacy-host CI coverage.
+
 ## 1.3.0
 
 - Add clickable critical/warning/information summaries and record counts in diagnostic tabs.

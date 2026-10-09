@@ -2,11 +2,11 @@
   "name": "database-performance-analyzer",
   "displayName": "Database Performance Analyzer",
   "description": "Understand database performance across PostgreSQL, MySQL, SQL Server, SQLite, MongoDB and Redis directly in VS Code.",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "publisher": "DaniyalMusadiq",
   "license": "MIT",
   "engines": {
-    "vscode": "^1.101.0"
+    "vscode": "^1.71.2"
   },
   "categories": [
     "Other",
@@ -35,7 +35,16 @@
     "virtualWorkspaces": false
   },
   "activationEvents": [
-    "onView:dbPerf.connections"
+    "onView:dbPerf.connections",
+    "onCommand:dbPerf.open",
+    "onCommand:dbPerf.add",
+    "onCommand:dbPerf.detect",
+    "onCommand:dbPerf.demo",
+    "onCommand:dbPerf.refresh",
+    "onCommand:dbPerf.explain",
+    "onCommand:dbPerf.remove",
+    "onCommand:dbPerf.password",
+    "onCommand:dbPerf.manage"
   ],
   "contributes": {
     "commands": [
@@ -204,7 +213,7 @@
     "@types/node": "^26.6.4",
     "@types/pg": "^8.23.1",
     "@types/sql.js": "^1.4.11",
-    "@types/vscode": "^1.95.0",
+    "@types/vscode": "1.71.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",

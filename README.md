@@ -1,6 +1,6 @@
 # Database Performance Analyzer
 
-Find expensive database work without leaving VS Code. A guided connection flow leads to a dashboard of query costs, sessions, storage, indexes and actionable performance observations.
+Find expensive database work without leaving VS Code. **VS Code 1.71.2 is supported for PostgreSQL, MySQL/MariaDB, SQLite and demo. Use VS Code 1.101+ for all six engines.** A guided connection flow leads to a dashboard of query costs, sessions, storage, indexes and actionable performance observations.
 
 Requires VS Code 1.101 or later (Node 22 extension host).
 
@@ -8,10 +8,10 @@ Requires VS Code 1.101 or later (Node 22 extension host).
 
 ## Start in a minute
 
-1. Install the VSIX with **Extensions → ⋯ → Install from VSIX…**, or run `code --install-extension database-performance-analyzer-1.3.0.vsix`.
+1. Install the VSIX with **Extensions → ⋯ → Install from VSIX…**, or run `code --install-extension database-performance-analyzer-1.4.0.vsix`.
 2. Open **Database Performance** in the activity bar.
 3. Choose **Explore Demo**, **Detect Project Databases**, or **Add Connection**.
-4. Choose **Guided connection setup**, **Paste a connection URL**, or **Open a SQLite database file**. Name the connection and choose transport security. Guided setup safely encodes special characters in credentials.
+4. Choose **Local database defaults**, **Guided connection setup**, **Detect from this project**, **Paste a connection URL**, or **Open a SQLite database file**. Name the connection and choose transport security. Guided setup safely encodes special characters in credentials.
 5. Refresh once or enable monitoring. Review collection notices before interpreting missing metrics.
 
 Use a dedicated account with only the required read and monitoring privileges. Passwords and complete URLs are saved in VS Code's encrypted SecretStorage. Non-secret connection names and target labels are stored in extension global state. Under Remote SSH or containers, database access runs on the workspace host; `localhost` refers to that host.
@@ -121,3 +121,17 @@ Click a finding summary to view that severity. Diagnostic tabs show available re
 History charts show minimum, maximum and latest values. Hover over a point for its capture time and value. History is local and lost on reload; it represents collected samples rather than continuous server measurements.
 
 Source and issue reports: [GitHub repository](https://github.com/DaniyalMusadiq1/Database-Performance-Analyzer).
+
+### Compatibility and connection guidance in 1.4
+
+| Editor / extension-host runtime | Available engines                       |
+| ------------------------------- | --------------------------------------- |
+| VS Code 1.71.2 / Node 16.14.2   | PostgreSQL, MySQL/MariaDB, SQLite, demo |
+| Node 20.19+                     | Core engines plus MongoDB and Redis     |
+| VS Code 1.101+ / Node 22+       | All six engines                         |
+
+The extension now compiles against the VS Code 1.71 API and builds for Node 16.14. Modern drivers are loaded only when used and checked against their runtime requirements. It does not downgrade database drivers to obsolete versions.
+
+**Local database defaults** skips host and port entry. Guided setup has Back buttons, individual validation and field explanations. **Manage connection → Edit connection fields** lets you change host, port, database and username; leaving the password blank keeps the stored password. Connection URL options are preserved. Use **Update connection URL** for MongoDB SRV/cluster URLs or to remove an existing password. Changes save securely and refresh the selected connection automatically.
+
+Hover over dashboard controls for tooltips, or expand **Connection guide & troubleshooting** for examples and advice.

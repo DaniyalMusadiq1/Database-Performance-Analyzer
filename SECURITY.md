@@ -26,3 +26,7 @@ Bundled dependency license texts are generated in `THIRD_PARTY_NOTICES.md`. Buil
 ## Before public release
 
 Validate least-privilege permissions and TLS on real production-like instances for every supported engine, verify Windows/macOS and remote host behavior, rerun dependency audits, and test the packaged artifact in a fresh VS Code profile. See `VALIDATION.md` for completed and outstanding coverage. Do not use the extension as an authorization boundary or a replacement for operational database monitoring.
+
+## Legacy editor support
+
+VS Code 1.71.2 can use core engines and demo. Modern drivers keep their existing versions and are lazy-loaded after runtime checks; older hosts receive upgrade instructions for unavailable engines. Guided editing does not display the saved password; a blank replacement keeps it. Complete URLs and passwords stay in SecretStorage and never enter dashboard messages. Guided changes retain existing URL options.

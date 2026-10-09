@@ -45,6 +45,9 @@ jobs:
           DBPERF_TEST_MONGODB_URL: mongodb://localhost:27017/dbperf
           DBPERF_TEST_REDIS_URL: redis://localhost:6379/0
       - run: xvfb-run -a npm run test:host
+      - run: xvfb-run -a npm run test:host
+        env:
+          DBPERF_VSCODE_VERSION: '1.71.2'
       - run: npm run test:ui
       - run: npm run package
       - uses: actions/upload-artifact@v4
