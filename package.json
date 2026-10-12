@@ -2,7 +2,7 @@
   "name": "database-performance-analyzer",
   "displayName": "Database Performance Analyzer",
   "description": "Understand database performance across PostgreSQL, MySQL, SQL Server, SQLite, MongoDB and Redis directly in VS Code.",
-  "version": "1.5.0",
+  "version": "1.7.0",
   "publisher": "DaniyalMusadiq",
   "license": "MIT",
   "engines": {

@@ -16,6 +16,8 @@ import { loadProfiles, SerialQueue } from './profiles';
 import { settingNumber } from './settings';
 import {
   buildConnectionUri,
+  defaultConnectionTls,
+  connectionFailure,
   connectionDefaults,
   NetworkEngine,
   connectionFields,
@@ -93,6 +95,7 @@ export function activate(context: vscode.ExtensionContext) {
   let nextRefreshAt: number | undefined;
   let controller: AbortController | undefined;
   let busy = false;
+  let connecting = false;
   let disposed = false;
   let baseline: Snapshot | undefined;
   let current: Snapshot | undefined;
@@ -150,6 +153,7 @@ export function activate(context: vscode.ExtensionContext) {
         unavailable: runtimeIssue(p.engine),
       })),
       selected,
+      recent: context.globalState.get<string>('lastConnection'),
       reset,
       trusted: vscode.workspace.isTrusted,
       slowQueryMs: options().slowQueryMs,
@@ -324,7 +328,25 @@ export function activate(context: vscode.ExtensionContext) {
                 if (current) post({ type: 'snapshot', snapshot: current, history: [] });
                 if (refreshError) post({ type: 'error', message: refreshError, stale: true });
                 break;
+              case 'connect':
+                try {
+                  await connectForm(v);
+                } catch (error) {
+                  post({ type: 'setupError', message: redactError(error) });
+                }
+                break;
               case 'add':
+                post({ type: 'setup' });
+                break;
+              case 'sqliteFile':
+                await addSqlite();
+                break;
+              case 'reconnect': {
+                const id = context.globalState.get<string>('lastConnection') || profiles[0]?.id;
+                if (id && profiles.some((p) => p.id === id)) await select(id);
+                break;
+              }
+              case 'advancedAdd':
                 await add();
                 break;
               case 'detect':
@@ -348,6 +370,7 @@ export function activate(context: vscode.ExtensionContext) {
               case 'baseline':
                 if (current) {
                   baseline = deserialize(serialize(current)) as Snapshot;
+                  post({ type: 'baselineState', timestamp: baseline.timestamp });
                   post({ type: 'comparison', comparison: compareSnapshots(baseline, current) });
                 }
                 break;
@@ -376,15 +399,29 @@ export function activate(context: vscode.ExtensionContext) {
       sendProfiles();
       return;
     }
+    if (
+      selected === id &&
+      current &&
+      !refreshError &&
+      Date.now() - Date.parse(current.timestamp) < 10000
+    ) {
+      sendProfiles();
+      post({ type: 'snapshot', snapshot: current, history: chartHistory(history.get(id)) });
+      return;
+    }
     stop();
     selected = all().some((p) => p.id === id) ? id : undefined;
     baseline = undefined;
     current = undefined;
     refreshError = undefined;
-    sendProfiles();
-    if (selected) await refresh();
+    sendProfiles(true);
+    if (selected) {
+      await refresh();
+      if (current && selected !== 'demo')
+        await context.globalState.update('lastConnection', selected);
+    }
   }
-  function toggleLive() {
+  function toggleLive(refreshNow = true) {
     if (monitoring) {
       stop();
       return;
@@ -408,7 +445,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (!busy && panel?.visible) void refresh();
     }, secs * 1000);
     sendLive();
-    void refresh();
+    if (refreshNow) void refresh();
   }
   async function add(seed?: string) {
     trust();
@@ -487,62 +524,124 @@ export function activate(context: vscode.ExtensionContext) {
     const engine = detectEngine(uri);
     const issue = runtimeIssue(engine);
     if (issue) throw new Error(issue);
-    const name = await vscode.window.showInputBox({
-      title: 'Name this connection',
-      prompt: `Choose a recognizable name, e.g. Local development or Production read-only. Target: ${targetOf(uri)}`,
-      value: `${engine} · ${targetOf(uri)}`,
-      validateInput: (v) =>
-        !v.trim() ? 'Enter a name.' : v.length > 100 ? 'Use at most 100 characters.' : undefined,
-      ignoreFocusOut: true,
-    });
-    if (!name) return;
-    let tls = false;
-    if (engine !== 'sqlite') {
-      const choice = await vscode.window.showQuickPick(
-        [
-          {
-            label: 'Verified TLS',
-            description: 'Encrypt and verify the server certificate',
-            tls: true,
-          },
-          {
-            label: 'Plaintext',
-            description: 'Only for local development or a trusted tunnel',
-            tls: false,
-          },
-        ],
-        {
-          title: 'Choose connection security',
-          placeHolder:
-            'Choose Verified TLS for remote/cloud databases; Plaintext only for local development or a trusted tunnel.',
-          ignoreFocusOut: true,
-        },
-      );
-      if (!choice) return;
-      tls = choice.tls;
-      if ((uri.startsWith('rediss:') || uri.startsWith('mongodb+srv:')) && !tls)
-        throw new Error('This URL requires TLS. Select Verified TLS.');
-    }
-    const p: Profile = {
+    await saveConnection(uri, '', defaultConnectionTls(uri), false);
+  }
+  async function saveConnection(uri: string, name: string, tls: boolean, live: boolean) {
+    trust();
+    validateUri(uri);
+    const engine = detectEngine(uri);
+    const issue = runtimeIssue(engine);
+    if (issue) throw new Error(issue);
+    let p: Profile = {
       id: randomUUID(),
-      name: name.trim(),
+      name: name.trim() || `${engine} · ${targetOf(uri)}`,
       engine,
       target: targetOf(uri),
       tls,
       createdAt: new Date().toISOString(),
     };
-    await profileChanges.run(async () => {
-      await context.secrets.store('dbPerf.uri.' + p.id, uri);
-      try {
-        await context.globalState.update('profiles', [...profiles, p]);
-      } catch (e) {
-        await context.secrets.delete('dbPerf.uri.' + p.id);
-        throw e;
-      }
-      profiles = [...profiles, p];
-      tree.refresh();
+    if (busy || connecting) throw new Error('Wait for the current operation to finish.');
+    stop();
+    connecting = true;
+    const checkController = new AbortController();
+    controller = checkController;
+    busy = true;
+    post({ type: 'busy', value: true });
+    let checked: Snapshot;
+    try {
+      checked = await collect(p, uri, options());
+      throwIfAborted(checkController.signal);
+      if (disposed) return;
+      await profileChanges.run(async () => {
+        for (const existing of profiles.filter(
+          (x) => x.engine === engine && x.target === p.target && x.tls === tls,
+        )) {
+          if ((await context.secrets.get('dbPerf.uri.' + existing.id)) === uri) {
+            p = existing;
+            return;
+          }
+        }
+        await context.secrets.store('dbPerf.uri.' + p.id, uri);
+        try {
+          await context.globalState.update('profiles', [...profiles, p]);
+        } catch (e) {
+          await context.secrets.delete('dbPerf.uri.' + p.id);
+          throw e;
+        }
+        profiles = [...profiles, p];
+        tree.refresh();
+      });
+      checked.connection = p.name;
+      await open();
+      stop();
+      selected = p.id;
+      current = checked;
+      baseline = undefined;
+      refreshError = undefined;
+      const h = history.add(
+        p.id,
+        checked,
+        settingNumber(
+          vscode.workspace.getConfiguration('dbPerf').get('maxHistory'),
+          60,
+          5,
+          300,
+          true,
+        ),
+      );
+      sendProfiles(true);
+      post({ type: 'snapshot', snapshot: checked, history: chartHistory(h) });
+      await context.globalState.update('lastConnection', p.id);
+      post({ type: 'connected' });
+      if (live) toggleLive(false);
+    } catch (error) {
+      throw new Error(connectionFailure(error, uri));
+    } finally {
+      connecting = false;
+      busy = false;
+      controller = undefined;
+      post({ type: 'busy', value: false });
+    }
+  }
+  async function addSqlite() {
+    trust();
+    const files = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      canSelectFiles: true,
+      canSelectFolders: false,
+      openLabel: 'Connect SQLite snapshot',
+      filters: { 'SQLite databases': ['sqlite', 'sqlite3', 'db'], 'All files': ['*'] },
     });
-    await open(p.id);
+    if (!files?.[0]) return;
+    if (files[0].scheme !== 'file')
+      throw new Error('Choose a local SQLite file on the workspace host.');
+    await saveConnection(files[0].toString(), '', false, false);
+  }
+  async function connectForm(v: Record<string, unknown>) {
+    trust();
+    const field = (key: string) => (typeof v[key] === 'string' ? (v[key] as string) : '');
+    const engine = field('engine');
+    if (!Object.prototype.hasOwnProperty.call(connectionDefaults, engine))
+      throw new Error('Choose a supported database.');
+    const uri =
+      field('uri').trim() ||
+      buildConnectionUri(
+        engine as NetworkEngine,
+        field('host'),
+        field('port'),
+        field('database'),
+        field('user'),
+        field('password'),
+      );
+    const security = field('security');
+    const tls = security === 'verified' || (security !== 'local' && defaultConnectionTls(uri));
+    if (!tls && /^(rediss|mongodb\+srv):/i.test(uri))
+      throw new Error(
+        'This address requires encrypted transport. Choose Automatic or Verified TLS.',
+      );
+    const name = field('name');
+    if (name.length > 100) throw new Error('Use at most 100 characters for the connection name.');
+    await saveConnection(uri, name, tls, v.monitor === true);
   }
   async function inputStep(
     title: string,
@@ -775,23 +874,32 @@ export function activate(context: vscode.ExtensionContext) {
       },
       async (_progress, token) => {
         const uris = await vscode.workspace.findFiles(
-          '**/{package.json,*.prisma,.env,.env.*,docker-compose*.yml,compose*.yaml,settings.py,models.py,*entity.ts,*model.ts,*model.js,drizzle.config.ts,knexfile.js}',
+          '**/{package.json,*.prisma,.env,.env.*,docker-compose*.yml,docker-compose*.yaml,compose*.yml,compose*.yaml,settings.py,models.py,*entity.ts,*model.ts,*model.js,drizzle.config.ts,knexfile.js}',
           '**/{node_modules,.git,dist,build,venv,.venv,vendor}/**',
           100,
           token,
         );
         const files: { path: string; text: string }[] = [];
-        for (const uri of uris) {
+        // Bounded parallel reads reduce remote-workspace latency without unbounded file IO.
+        for (let i = 0; i < uris.length; i += 6) {
           if (token.isCancellationRequested) return;
-          try {
-            const st = await vscode.workspace.fs.stat(uri);
-            if (st.size > 1048576) continue;
-            files.push({
-              path: vscode.workspace.asRelativePath(uri),
-              text: Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8'),
-            });
-          } catch {}
+          const batch = await Promise.all(
+            uris.slice(i, i + 6).map(async (uri) => {
+              try {
+                const st = await vscode.workspace.fs.stat(uri);
+                if (st.size > 1048576 || token.isCancellationRequested) return;
+                return {
+                  path: vscode.workspace.asRelativePath(uri),
+                  text: Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8'),
+                };
+              } catch {
+                return;
+              }
+            }),
+          );
+          for (const file of batch) if (file) files.push(file);
         }
+        if (token.isCancellationRequested) return;
         const result = inspectFiles(files);
         post({
           type: 'discovery',
@@ -803,19 +911,22 @@ export function activate(context: vscode.ExtensionContext) {
           })),
         });
         if (result.connections.length) {
-          const picked = await vscode.window.showQuickPick(
-            result.connections.map((c) => ({
-              label: c.engine + ' · ' + c.target,
-              description: c.source,
-              uri: c.uri,
-            })),
-            {
-              title: 'Discovered databases',
-              placeHolder:
-                'Choose a connection to review and save, or Escape to view discovery results',
-            },
-          );
-          if (picked) await add(picked.uri);
+          const picked =
+            result.connections.length === 1
+              ? { uri: result.connections[0].uri }
+              : await vscode.window.showQuickPick(
+                  result.connections.map((c) => ({
+                    label: c.engine + ' · ' + c.target,
+                    description: c.source,
+                    uri: c.uri,
+                  })),
+                  {
+                    title: 'Discovered databases',
+                    placeHolder:
+                      'Choose a connection to review and save, or Escape to view discovery results',
+                  },
+                );
+          if (picked) await saveConnection(picked.uri, '', defaultConnectionTls(picked.uri), false);
         } else
           void vscode.window.showInformationMessage(
             'Discovery complete. Review detected frameworks and models in the dashboard; add a connection URL manually.',
@@ -976,7 +1087,11 @@ export function activate(context: vscode.ExtensionContext) {
       }),
     );
   register('dbPerf.open', open);
-  register('dbPerf.add', () => add());
+  register('dbPerf.add', async () => {
+    trust();
+    await open();
+    post({ type: 'setup' });
+  });
   register('dbPerf.detect', detect);
   register('dbPerf.demo', () => open('demo'));
   register('dbPerf.refresh', refresh);

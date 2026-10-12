@@ -1,5 +1,5 @@
 import { Engine } from './types';
-import { validateUri } from './security';
+import { detectEngine, redactError, validateUri } from './security';
 export type NetworkEngine = Exclude<Engine, 'demo' | 'sqlite'>;
 export const connectionDefaults: Record<
   NetworkEngine,
@@ -80,4 +80,44 @@ export function preserveConnectionOptions(original: string, updated: string): st
   if (old.protocol === 'rediss:') next.protocol = 'rediss:';
   validateUri(next.toString());
   return next.toString();
+}
+
+/** Remote hosts use verified encryption by default; only loopback defaults to plaintext. */
+export function defaultConnectionTls(uri: string): boolean {
+  if (detectEngine(uri) === 'sqlite') return false;
+  if (/^(rediss|mongodb\+srv):/i.test(uri)) return true;
+  try {
+    const url = new URL(uri);
+    if (
+      [...url.searchParams].some(
+        ([key, value]) =>
+          /^(sslmode|ssl|tls)$/i.test(key) &&
+          /^(require|verify-ca|verify-full|true|1)$/i.test(value),
+      )
+    )
+      return true;
+    return !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname.toLowerCase());
+  } catch {
+    return true;
+  }
+}
+
+/** Add practical next steps after credentials have been removed from driver errors. */
+export function connectionFailure(error: unknown, uri: string): string {
+  const message = redactError(error, uri);
+  let action = 'Check the database name and connection details, then try again.';
+  if (/password|authentication|login failed|access denied|NOAUTH|WRONGPASS|28P01/i.test(message))
+    action = 'Check your username and password. Use the account provided by your database service.';
+  else if (/certificate|self.signed|TLS|SSL/i.test(message))
+    action =
+      'Check Connection security and the server certificate. Remote servers need a trusted certificate.';
+  else if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(message))
+    action = 'Check the server address and your internet or VPN connection.';
+  else if (/ECONNREFUSED/i.test(message))
+    action =
+      'Start your database service and check the server and port. In SSH or containers, localhost refers to the workspace host.';
+  else if (/timeout|timed out|ETIMEDOUT/i.test(message))
+    action =
+      'Check that the database is reachable, your VPN is connected and the firewall allows this port.';
+  return message + '\n' + action;
 }

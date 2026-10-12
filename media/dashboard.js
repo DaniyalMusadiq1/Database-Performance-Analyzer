@@ -202,6 +202,15 @@
   function syncControls() {
     const selected = profiles.find((p) => p.id === $('connection').value);
     $('interval').disabled = busy;
+    for (const id of [
+      'setup-submit',
+      'setup-detect',
+      'setup-file',
+      'reconnect',
+      'setup-address',
+      'setup-local',
+    ])
+      $(id).disabled = busy || !trusted;
     for (const id of ['add', 'welcome-add', 'detect', 'project-detect'])
       $(id).disabled = busy || !trusted;
     $('manage').disabled = busy || !trusted || !selected || selected.engine === 'demo';
@@ -468,7 +477,81 @@
     renderTrend();
   };
   $('cancel').onclick = () => send('cancel');
-  $('add').onclick = $('welcome-add').onclick = () => send('add');
+  function showSetup() {
+    $('setup').hidden = false;
+    $('welcome').hidden = true;
+    $('dashboard').hidden = true;
+    $('setup').scrollIntoView({ block: 'start' });
+    $('setup-engine').focus();
+  }
+  $('add').onclick = $('welcome-add').onclick = showSetup;
+  $('setup-close').onclick = () => {
+    $('setup').hidden = true;
+    $('welcome').hidden = !!shownId;
+    $('dashboard').hidden = !shownId;
+    $('setup-password').value = '';
+    $('setup-uri').value = '';
+  };
+  $('setup-detect').onclick = () => send('detect');
+  $('setup-file').onclick = () => send('sqliteFile');
+  $('reconnect').onclick = () => send('reconnect');
+  let addressMode = false;
+  function setupMode(useAddress) {
+    addressMode = useAddress;
+    $('setup-address-fields').hidden = !useAddress;
+    $('setup-fields').hidden = useAddress;
+    $('setup-address').setAttribute('aria-pressed', String(useAddress));
+    $('setup-local').setAttribute('aria-pressed', String(!useAddress));
+    $('setup-uri').required = useAddress;
+    $('setup-hint').textContent = useAddress
+      ? 'Paste once and connect. No database type, host or port selection needed.'
+      : 'Local server and port are filled in. Enter the account your database uses.';
+    $('setup-' + (useAddress ? 'uri' : 'engine')).focus();
+  }
+  $('setup-address').onclick = () => setupMode(true);
+  $('setup-local').onclick = () => setupMode(false);
+  const defaults = {
+    postgres: [5432, 'postgres'],
+    mysql: [3306, ''],
+    sqlserver: [1433, 'master'],
+    mongodb: [27017, 'admin'],
+    redis: [6379, '0'],
+  };
+  $('setup-engine').onchange = () => {
+    const [port, database] = defaults[$('setup-engine').value];
+    $('setup-port').value = port;
+    $('setup-database').value = database;
+    $('setup-user').value = {
+      postgres: 'postgres',
+      mysql: 'root',
+      sqlserver: '',
+      mongodb: '',
+      redis: '',
+    }[$('setup-engine').value];
+  };
+  $('connection-form').onsubmit = (event) => {
+    event.preventDefault();
+    if (busy || !trusted) return;
+    const fields = {};
+    for (const key of [
+      'engine',
+      'uri',
+      'host',
+      'port',
+      'database',
+      'user',
+      'password',
+      'name',
+      'security',
+    ])
+      fields[key] = $('setup-' + key).value;
+    if (!addressMode) fields.uri = '';
+    send('connect', { ...fields, monitor: $('setup-monitor').checked });
+    $('setup-password').value = '';
+    $('setup-uri').value = '';
+    $('setup-status').classList.remove('error');
+    $('setup-status').textContent = 'Checking your connection…';
+  };
   $('detect').onclick = $('project-detect').onclick = () => send('detect');
   $('demo').onclick = () => send('demo');
   $('live').onclick = () => send('live');
@@ -505,7 +588,15 @@
   };
   window.addEventListener('message', (e) => {
     const m = e.data;
-    if (m.type === 'profiles') {
+    if (m.type === 'setup') {
+      showSetup();
+    } else if (m.type === 'setupError') {
+      $('setup-status').textContent = m.message;
+      $('setup-status').classList.add('error');
+    } else if (m.type === 'connected') {
+      $('setup').hidden = true;
+      $('setup-status').textContent = 'Connected successfully.';
+    } else if (m.type === 'profiles') {
       profiles = m.profiles;
       trusted = m.trusted !== false;
       slowQueryMs = Number.isFinite(m.slowQueryMs) ? m.slowQueryMs : 100;
@@ -524,6 +615,11 @@
       $('compatibility-notice').hidden = major >= 22;
       $('compatibility-notice').textContent =
         'Older VS Code runtime: PostgreSQL, MySQL/MariaDB, SQLite and demo are available. Some engines require an update to VS Code 1.101 or newer.';
+      const recent =
+        profiles.find((p) => p.id === m.recent && p.engine !== 'demo') ||
+        profiles.find((p) => p.engine !== 'demo');
+      $('reconnect').hidden = !recent;
+      $('reconnect').textContent = recent ? 'Reconnect to ' + recent.name : 'Reconnect';
       const selected = m.selected;
       if (shownId !== selected || m.reset) {
         shownId = selected;
@@ -592,6 +688,10 @@
         $('dashboard').hidden = false;
         $('welcome').hidden = true;
       }
+      if (!$('setup').hidden) {
+        $('welcome').hidden = true;
+        $('dashboard').hidden = true;
+      }
     } else if (m.type === 'snapshot') {
       renderSnapshot(m.snapshot, m.history);
       $('error').hidden = true;
@@ -603,6 +703,8 @@
       syncControls();
       renderMonitoringStatus();
     } else if (m.type === 'error') {
+      $('setup-status').textContent =
+        'Connection could not be completed. Review the message below and try again.';
       $('error').textContent = m.message;
       $('error').hidden = false;
       if (m.stale) {
@@ -675,6 +777,7 @@
         );
       $('comparison').append(ul);
     } else if (m.type === 'discovery') {
+      $('setup').hidden = true;
       const d = $('discovery');
       d.replaceChildren(
         el('h3', 'Frameworks'),

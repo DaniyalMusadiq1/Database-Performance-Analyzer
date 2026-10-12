@@ -138,7 +138,11 @@ async function msSession<T>(
   work: (q: (sql: string) => Promise<Row[]>) => Promise<T>,
 ): Promise<T> {
   requireRuntime('sqlserver');
-  const { default: mssql } = await import('mssql');
+  const { default: mssql } = await deadline(
+    o,
+    () => import('mssql'),
+    () => {},
+  );
   throwIfAborted(o.signal);
   const u = new URL(uri);
   const pool = new mssql.ConnectionPool({
@@ -534,7 +538,11 @@ export async function collect(p: Profile, uri: string, o: Options): Promise<Snap
     );
   } else if (p.engine === 'mongodb') {
     requireRuntime('mongodb');
-    const { MongoClient } = await import('mongodb');
+    const { MongoClient } = await deadline(
+      o,
+      () => import('mongodb'),
+      () => {},
+    );
     throwIfAborted(o.signal);
     const c = new MongoClient(uri, {
       serverSelectionTimeoutMS: o.timeoutMs,
@@ -672,7 +680,11 @@ export async function collect(p: Profile, uri: string, o: Options): Promise<Snap
     }
   } else if (p.engine === 'redis') {
     requireRuntime('redis');
-    const { createClient } = await import('redis');
+    const { createClient } = await deadline(
+      o,
+      () => import('redis'),
+      () => {},
+    );
     throwIfAborted(o.signal);
     const c = createClient({
       url: redisTransportUri(uri, p.tls),

@@ -2,17 +2,17 @@
 
 Find expensive database work without leaving VS Code. **VS Code 1.71.2 is supported for PostgreSQL, MySQL/MariaDB, SQLite and demo. Use VS Code 1.101+ for all six engines.** A guided connection flow leads to a dashboard of query costs, sessions, storage, indexes and actionable performance observations.
 
-Requires VS Code 1.101 or later (Node 22 extension host).
+All six engines require VS Code 1.101 or later (Node 22 extension host).
 
 **Supported:** PostgreSQL 13+, MySQL 8+ / MariaDB with compatible Performance Schema, SQL Server 2019+, SQLite 3 files, MongoDB 6+, Redis 6+. Database distributions and services may expose fewer diagnostics. This is not universal support for every database product.
 
 ## Start in a minute
 
-1. Install the VSIX with **Extensions → ⋯ → Install from VSIX…**, or run `code --install-extension database-performance-analyzer-1.5.0.vsix`.
+1. Install the VSIX with **Extensions → ⋯ → Install from VSIX…**, or run `code --install-extension database-performance-analyzer-1.7.0.vsix`.
 2. Click the **database icon** in the left activity bar, then **Open dashboard**. You can also click **DB Performance** in the bottom status bar.
 3. Choose **Explore Demo**, **Detect Project Databases**, or **Add Connection**.
-4. Choose **Local database defaults**, **Guided connection setup**, **Detect from this project**, **Paste a connection URL**, or **Open a SQLite database file**. Name the connection and choose transport security. Guided setup safely encodes special characters in credentials.
-5. Refresh once or enable monitoring. Review collection notices before interpreting missing metrics.
+4. Choose **Paste an address** for a provider URL, **Enter details** for a local database, or **Open SQLite file**. Server, port, name and security are grouped under optional settings. Standard ports, connection names and encryption settings are filled in automatically. Use **Find in my project** to detect URLs or separate `DB_CONNECTION`, `DB_HOST`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` settings in `.env` files. Native `PGHOST`, `MYSQL_HOST` and `REDIS_HOST` field families are also supported. A single detected connection is checked and saved directly; multiple candidates let you choose.
+5. Click **Connect and show results**. The extension checks the database before saving and displays diagnostics immediately. Live updates are enabled by the checkbox on the form and pause when the dashboard is hidden. Use **Reconnect** on the home screen to return to your most recently used database. Re-adding the same address reuses your saved connection.
 
 Use a dedicated account with only the required read and monitoring privileges. Passwords and complete URLs are saved in VS Code's encrypted SecretStorage. Non-secret connection names and target labels are stored in extension global state. Under Remote SSH or containers, database access runs on the workspace host; `localhost` refers to that host.
 
@@ -29,7 +29,7 @@ redis://:password@localhost:6379/0
 rediss://:password@redis.example:6380/0
 ```
 
-TLS defaults to certificate verification. Plaintext is an explicit choice for local development or a trusted tunnel. Self-signed certificates must be trusted by the Node/OS trust configuration; certificate verification cannot be disabled in the extension. For Redis, the URL scheme is normalized to match the TLS choice. MySQL and SQL Server use the host, port, user, password and database fields; MySQL URL query parameters are not applied. SQL Server supports SQL authentication; integrated authentication and named instances are not included. MongoDB SRV and Redis `rediss` require TLS. PostgreSQL TLS URL parameters are removed in favor of the explicit TLS choice.
+Automatic security uses verified TLS for remote hosts and plaintext for loopback hosts. Connection URLs requesting encryption also use verified TLS. You can override the choice in Connection security for local development or a trusted tunnel. Self-signed certificates must be trusted by the Node/OS trust configuration; certificate verification cannot be disabled in the extension. For Redis, the URL scheme is normalized to match the TLS choice. MySQL and SQL Server use the host, port, user, password and database fields; MySQL URL query parameters are not applied. SQL Server supports SQL authentication; integrated authentication and named instances are not included. MongoDB SRV and Redis `rediss` require TLS. PostgreSQL TLS URL parameters are removed in favor of the explicit TLS choice.
 
 ## What you can inspect
 

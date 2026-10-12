@@ -67,3 +67,38 @@ test('Guided editing preserves credentials, URL options and secure Redis transpo
   assert.throws(() => connectionFields('mongodb+srv://cluster.example/app'), /URL/);
   assert.throws(() => connectionFields('mongodb://one:27017,two:27017/app'));
 });
+
+test('automatic security uses verified TLS remotely and respects encrypted local URLs', async () => {
+  const { defaultConnectionTls } = await import('../src/connection.js');
+  for (const uri of [
+    'postgresql://remote/app',
+    'mongodb+srv://cluster/app',
+    'rediss://localhost/0',
+    'postgresql://localhost/app?sslmode=require',
+  ])
+    assert.equal(defaultConnectionTls(uri), true);
+  for (const uri of [
+    'mysql://localhost/app',
+    'postgresql://127.0.0.1/app',
+    'redis://[::1]/0',
+    'file:///tmp/app.sqlite',
+  ])
+    assert.equal(defaultConnectionTls(uri), false);
+});
+
+test('connection failures give useful actions without revealing credentials', async () => {
+  const { connectionFailure } = await import('../src/connection.js');
+  const uri = 'postgresql://reader:topsecret@localhost/app';
+  assert.match(connectionFailure(new Error('ECONNREFUSED'), uri), /Start your database/);
+  assert.match(
+    connectionFailure(new Error('password authentication failed: topsecret'), uri),
+    /Check your username/,
+  );
+  assert.ok(
+    !connectionFailure(new Error('password authentication failed: topsecret'), uri).includes(
+      'topsecret',
+    ),
+  );
+  assert.match(connectionFailure(new Error('ETIMEDOUT'), uri), /VPN/);
+  assert.match(connectionFailure(new Error('self signed certificate'), uri), /trusted certificate/);
+});

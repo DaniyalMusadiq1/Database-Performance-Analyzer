@@ -69,6 +69,47 @@ try {
   });
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   assert.ok(await page.locator('#welcome').isVisible());
+  await page.click('#welcome-add');
+  assert.ok(await page.locator('#setup').isVisible());
+  await page.selectOption('#setup-engine', 'mysql');
+  assert.equal(await page.inputValue('#setup-port'), '3306');
+  await page.fill('#setup-user', 'test-user');
+  await page.fill('#setup-password', 'test-password');
+  await page.click('#setup-submit');
+  assert.ok(
+    await page.evaluate(() =>
+      window.sent.some((m) => m.type === 'connect' && m.engine === 'mysql' && m.monitor === true),
+    ),
+  );
+  assert.equal(
+    await page.inputValue('#setup-password'),
+    '',
+    'Credentials cleared after submission',
+  );
+  await page.evaluate(() => window.postMessage({ type: 'connected' }, '*'));
+  assert.ok(await page.locator('#setup').isHidden());
+  await page.click('#add');
+  await page.click('#setup-address');
+  assert.ok(await page.locator('#setup-fields').isHidden());
+  await page.fill('#setup-uri', 'rediss://localhost:6379/0');
+  await page.click('#setup-submit');
+  assert.ok(
+    await page.evaluate(() =>
+      window.sent.some((m) => m.type === 'connect' && m.uri === 'rediss://localhost:6379/0'),
+    ),
+  );
+  assert.equal(await page.inputValue('#setup-uri'), '');
+  await page.evaluate(() =>
+    window.postMessage({ type: 'setupError', message: 'Check the server and port.' }, '*'),
+  );
+  assert.ok((await page.locator('#setup-status').innerText()).includes('Check the server'));
+  await page.click('#setup-file');
+  assert.ok(await page.evaluate(() => window.sent.some((m) => m.type === 'sqliteFile')));
+  await page.click('#setup-local');
+  assert.ok(await page.locator('#setup-address-fields').isHidden());
+  assert.ok(await page.locator('#setup-fields').isVisible());
+  await page.screenshot({ path: '/tmp/dbperf-setup.png', fullPage: true });
+  await page.click('#setup-close');
   await page.click('#demo');
   assert.ok(await page.evaluate(() => window.sent.some((m) => m.type === 'demo')));
   const r = await build({
@@ -91,6 +132,12 @@ try {
       target: 'localhost:5432/app',
     },
   ];
+  await page.evaluate(
+    (profiles) => window.postMessage({ type: 'profiles', profiles, recent: 'other' }, '*'),
+    profiles,
+  );
+  await page.click('#reconnect');
+  assert.ok(await page.evaluate(() => window.sent.some((m) => m.type === 'reconnect')));
   await page.evaluate(
     ({ profiles, snapshot }) => {
       window.postMessage({ type: 'profiles', profiles, selected: 'demo' }, '*');

@@ -558,3 +558,48 @@ footer {
 .connection-help code {
   overflow-wrap: anywhere;
 }
+
+.setup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.setup-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.setup-grid input,
+.setup-grid select {
+  box-sizing: border-box;
+  width: 100%;
+}
+#setup-status {
+  color: var(--vscode-descriptionForeground);
+}
+@media (max-width: 640px) {
+  .setup-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.setup-methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+}
+.setup-methods button[aria-pressed='true'] {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+#setup-address-fields input {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 10px;
+}
+#setup-status {
+  white-space: pre-line;
+}

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.0
+
+- Split setup into paste-address and simple-details modes with advanced fields collapsed.
+- Add direct SQLite file connection and one-click reconnect to the most recently used database.
+- Reuse duplicate saved connections and recently captured results to avoid extra setup and collection.
+- Read project configuration in bounded parallel batches and recognize native PostgreSQL, MySQL and Redis environment fields.
+- Add actionable, credential-redacted connection errors and keep the setup screen focused.
+
+## 1.6.0
+
+- Replace repeated setup dialogs with a single connection form, automatic ports, names and transport defaults.
+- Check connections before saving and display the first snapshot without a second collection.
+- Allow live monitoring to start from setup with one checkbox.
+- Detect separate dotenv database fields, validate discovered URLs and connect a single candidate directly.
+- Clear stale comparison and plan state when switching connections; synchronize saved baseline state.
+- Add regression tests for setup, credential clearing, discovery and automatic security.
+
 ## 1.5.0
 
 - Add permanent sidebar shortcuts for dashboard, connection setup, project detection and demo.
