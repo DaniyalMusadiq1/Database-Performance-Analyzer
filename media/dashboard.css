@@ -603,3 +603,39 @@ footer {
 #setup-status {
   white-space: pre-line;
 }
+
+.view-choice {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+#copy-status {
+  color: var(--vscode-descriptionForeground);
+}
+#readiness {
+  border-left: 3px solid var(--vscode-focusBorder);
+  padding-left: 16px;
+  margin: 16px 0;
+}
+#setup-error-technical {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.simple-view .tabs,
+.simple-view .trend-panel,
+.simple-view #baseline,
+.simple-view #clear-baseline,
+.simple-view #clear-history,
+.simple-view #metrics {
+  display: none;
+}
+.simple-view .interval-control,
+.simple-view #settings,
+.simple-view #detect {
+  display: none;
+}
+#next-step button {
+  margin: 4px 8px 4px 0;
+}

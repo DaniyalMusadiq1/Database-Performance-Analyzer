@@ -69,6 +69,10 @@ try {
   });
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   assert.ok(await page.locator('#welcome').isVisible());
+  await page.click('#welcome-help');
+  await page.click('#copy-help');
+  assert.ok(await page.evaluate(() => window.sent.some((m) => m.type === 'copyHelp')));
+  await page.click('#help-close');
   await page.click('#welcome-add');
   assert.ok(await page.locator('#setup').isVisible());
   await page.selectOption('#setup-engine', 'mysql');
@@ -83,13 +87,21 @@ try {
   );
   assert.equal(
     await page.inputValue('#setup-password'),
-    '',
-    'Credentials cleared after submission',
+    'test-password',
+    'Credentials retained in memory for retry until successful connection',
   );
   await page.evaluate(() => window.postMessage({ type: 'connected' }, '*'));
   assert.ok(await page.locator('#setup').isHidden());
   await page.click('#add');
+  await page.locator('#setup-advanced').evaluate((el) => (el.open = true));
+  await page.fill('#setup-port', '99999');
   await page.click('#setup-address');
+  assert.ok(await page.locator('#setup-port').isDisabled());
+  await page.fill('#setup-uri', 'https://not-a-database.example');
+  assert.equal(await page.locator('#setup-uri').evaluate((el) => el.validity.valid), false);
+  assert.ok((await page.locator('#setup-link-check').textContent()).includes('not a supported'));
+  await page.check('#setup-show-password');
+  assert.equal(await page.locator('#setup-uri').getAttribute('type'), 'text');
   assert.ok(await page.locator('#setup-fields').isHidden());
   await page.fill('#setup-uri', 'rediss://localhost:6379/0');
   await page.click('#setup-submit');
@@ -98,18 +110,25 @@ try {
       window.sent.some((m) => m.type === 'connect' && m.uri === 'rediss://localhost:6379/0'),
     ),
   );
-  assert.equal(await page.inputValue('#setup-uri'), '');
+  assert.equal(await page.inputValue('#setup-uri'), 'rediss://localhost:6379/0');
   await page.evaluate(() =>
     window.postMessage({ type: 'setupError', message: 'Check the server and port.' }, '*'),
   );
-  assert.ok((await page.locator('#setup-status').innerText()).includes('Check the server'));
+  assert.ok(
+    (await page.locator('#setup-error-technical').textContent()).includes('Check the server'),
+  );
+  assert.ok(await page.locator('#setup-error-details').isVisible());
   await page.click('#setup-file');
   assert.ok(await page.evaluate(() => window.sent.some((m) => m.type === 'sqliteFile')));
   await page.click('#setup-local');
   assert.ok(await page.locator('#setup-address-fields').isHidden());
   assert.ok(await page.locator('#setup-fields').isVisible());
+  assert.ok(await page.locator('#setup-uri').isDisabled());
+  await page.fill('#setup-port', '3306');
   await page.screenshot({ path: '/tmp/dbperf-setup.png', fullPage: true });
   await page.click('#setup-close');
+  assert.equal(await page.locator('#setup-uri').getAttribute('type'), 'password');
+  assert.equal(await page.inputValue('#setup-uri'), '');
   await page.click('#demo');
   assert.ok(await page.evaluate(() => window.sent.some((m) => m.type === 'demo')));
   const r = await build({
@@ -146,6 +165,40 @@ try {
     },
     { profiles, snapshot },
   );
+  assert.equal(await page.inputValue('#view-mode'), 'simple');
+  assert.ok(await page.locator('.tabs').isHidden());
+  assert.ok((await page.locator('#next-title').innerText()).includes('Sample results'));
+  await page.click('#copy-report');
+  assert.ok(await page.evaluate(() => window.sent.some((m) => m.type === 'copyReport')));
+  await page.evaluate(
+    (s) =>
+      window.postMessage(
+        {
+          type: 'snapshot',
+          snapshot: {
+            ...s,
+            engine: 'postgres',
+            availability: [
+              {
+                label: 'Query statistics',
+                state: 'permission-required',
+                action: 'Ask your administrator for monitoring access.',
+              },
+            ],
+          },
+          history: [],
+        },
+        '*',
+      ),
+    snapshot,
+  );
+  assert.ok((await page.locator('#next-title').innerText()).includes('limited visibility'));
+  assert.ok((await page.locator('#readiness').innerText()).includes('Monitoring access needed'));
+  await page.evaluate(
+    (s) => window.postMessage({ type: 'snapshot', snapshot: s, history: [s] }, '*'),
+    snapshot,
+  );
+  await page.selectOption('#view-mode', 'advanced');
   await page.locator('#metrics .metric').first().waitFor();
   assert.equal(await page.locator('#metrics .metric').count(), 4);
   assert.ok(await page.locator('#manage').isDisabled(), 'Demo is not a saved connection');
@@ -205,7 +258,7 @@ try {
     await page
       .locator('#findings')
       .innerText()
-      .then((x) => x.includes('blocked session')),
+      .then((x) => x.includes('waiting request')),
   );
   await page.selectOption('#trend-metric', 'Cache hit ratio');
   assert.ok((await page.locator('#trend-label').innerText()).includes('Cache hit ratio'));
@@ -265,10 +318,12 @@ try {
   await page.evaluate(() => window.postMessage({ type: 'busy', value: false }, '*'));
   await page.click('[data-tab=overview]');
   await mkdir('media/screenshots', { recursive: true });
+  await page.selectOption('#view-mode', 'simple');
   await page.screenshot({ path: 'media/screenshots/dashboard.png', fullPage: true });
   await page.setViewportSize({ width: 560, height: 1000 });
   assert.ok(await page.locator('#refresh').isVisible());
   await page.screenshot({ path: 'media/screenshots/dashboard-narrow.png', fullPage: true });
+  await page.selectOption('#view-mode', 'advanced');
   await page.evaluate(
     (profiles) => window.postMessage({ type: 'profiles', profiles, selected: 'other' }, '*'),
     profiles,

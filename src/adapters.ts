@@ -22,15 +22,33 @@ function base(p: Profile): Snapshot {
     findings: [],
     capabilities: [],
     notices: [],
+    availability: [],
     queryMode: ['mongodb', 'redis'].includes(p.engine) ? 'samples' : 'cumulative',
   };
 }
 async function optional(s: Snapshot, label: string, uri: string, fn: () => Promise<void>) {
   try {
     await fn();
+    s.availability?.push({ label, state: 'available', action: 'Available for this account.' });
   } catch (e) {
     if (isInterrupted(e)) throw e;
-    s.notices.push(`${label} unavailable: ${redactError(e, uri)}`);
+    const message = redactError(e, uri);
+    const state = /permission|denied|not authorized|privilege/i.test(message)
+      ? 'permission-required'
+      : /not exist|pg_stat_statements|not enabled|disabled/i.test(message)
+        ? 'not-configured'
+        : 'failed';
+    s.availability?.push({
+      label,
+      state,
+      action:
+        state === 'permission-required'
+          ? 'Ask your administrator for monitoring access. Other available checks still work.'
+          : state === 'not-configured'
+            ? 'Ask your administrator to review diagnostic configuration. The app does not change server settings.'
+            : 'Retry the check; expand collection notes for technical details.',
+    });
+    s.notices.push(`${label} unavailable: ${message}`);
   }
 }
 async function pgSession<T>(
@@ -233,13 +251,14 @@ export async function collect(p: Profile, uri: string, o: Options): Promise<Snap
       await optional(s, 'Sessions', uri, async () => {
         s.sessions = (
           await q(
-            `SELECT pid, usename, state, EXTRACT(EPOCH FROM now()-COALESCE(xact_start,query_start,backend_start)) AS age, wait_event_type, wait_event, LEFT(query,4000) AS query, pg_blocking_pids(pid) AS blockers FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() ORDER BY xact_start NULLS LAST LIMIT 100`,
+            `SELECT pid, usename, state, EXTRACT(EPOCH FROM now()-COALESCE(xact_start,query_start,backend_start)) AS age, EXTRACT(EPOCH FROM now()-state_change) AS idle_seconds, wait_event_type, wait_event, LEFT(query,4000) AS query, pg_blocking_pids(pid) AS blockers FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() ORDER BY xact_start NULLS LAST LIMIT 100`,
           )
         ).map((r) => ({
           id: String(r.pid),
           user: r.usename ?? '',
           state: r.state ?? 'restricted',
           ageSeconds: n(r.age),
+          idleSeconds: r.state === 'idle in transaction' ? n(r.idle_seconds) : undefined,
           wait: [r.wait_event_type, r.wait_event].filter(Boolean).join(' / '),
           query: r.query ?? '',
           blockers: (r.blockers ?? []).map(String),
@@ -257,7 +276,7 @@ export async function collect(p: Profile, uri: string, o: Options): Promise<Snap
         const schema = '"' + String(extension[0].nspname).replace(/"/g, '""') + '"';
         s.queries = (
           await q(
-            `SELECT queryid::text AS id, LEFT(query,4000) AS query, calls, total_exec_time AS total, mean_exec_time AS mean, rows FROM ${schema}.pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) ORDER BY total_exec_time DESC LIMIT 50`,
+            `SELECT userid::text || ':' || queryid::text AS id, LEFT(query,4000) AS query, calls, total_exec_time AS total, mean_exec_time AS mean, rows FROM ${schema}.pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) ORDER BY total_exec_time DESC LIMIT 50`,
           )
         ).map((r) => ({
           id: r.id,
@@ -427,7 +446,7 @@ export async function collect(p: Profile, uri: string, o: Options): Promise<Snap
       await optional(s, 'Query statistics', uri, async () => {
         s.queries = (
           await q(
-            `SELECT TOP 50 CONVERT(varchar(130),qs.sql_handle,1)+':'+CAST(qs.statement_start_offset AS varchar) AS id,SUBSTRING(st.text,(qs.statement_start_offset/2)+1,((CASE qs.statement_end_offset WHEN -1 THEN DATALENGTH(st.text) ELSE qs.statement_end_offset END-qs.statement_start_offset)/2)+1) AS query,qs.execution_count AS calls,qs.total_elapsed_time/1000.0 AS total,qs.total_elapsed_time/1000.0/NULLIF(qs.execution_count,0) AS mean,qs.total_rows AS rows FROM sys.dm_exec_query_stats qs CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st WHERE st.dbid=DB_ID() ORDER BY qs.total_elapsed_time DESC`,
+            `SELECT TOP 50 CONVERT(varchar(130),qs.plan_handle,1)+':'+CAST(qs.statement_start_offset AS varchar)+':'+CAST(qs.statement_end_offset AS varchar)+':'+CONVERT(varchar(30),qs.creation_time,126) AS id,SUBSTRING(st.text,(qs.statement_start_offset/2)+1,((CASE qs.statement_end_offset WHEN -1 THEN DATALENGTH(st.text) ELSE qs.statement_end_offset END-qs.statement_start_offset)/2)+1) AS query,qs.execution_count AS calls,qs.total_elapsed_time/1000.0 AS total,qs.total_elapsed_time/1000.0/NULLIF(qs.execution_count,0) AS mean,qs.total_rows AS rows FROM sys.dm_exec_query_stats qs CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st WHERE st.dbid=DB_ID() ORDER BY qs.total_elapsed_time DESC`,
           )
         ).map((r) => ({
           id: r.id,
@@ -802,8 +821,38 @@ export async function collect(p: Profile, uri: string, o: Options): Promise<Snap
       if (c.isOpen) c.destroy();
     }
   }
-  s.findings.push(...findingsFor(s, o.slowQueryMs));
+  s.findings.push(...findingsFor(s, o.slowQueryMs, o.idleTransactionSeconds));
   s.timestamp = new Date().toISOString();
+  for (const capability of ['queries', 'sessions', 'tables', 'indexes', 'explain']) {
+    const supported =
+      capability === 'sessions'
+        ? ['postgres', 'mysql', 'sqlserver'].includes(s.engine)
+        : capability === 'explain'
+          ? !['mongodb', 'redis'].includes(s.engine)
+          : capability === 'queries'
+            ? s.engine !== 'sqlite'
+            : capability === 'indexes'
+              ? s.engine !== 'redis'
+              : true;
+    if (!supported)
+      s.availability?.push({
+        label: capability,
+        state: 'unsupported',
+        action: 'This diagnostic is not collected for this database type.',
+      });
+  }
+  for (const capability of s.capabilities) {
+    if (capability === 'explain') continue;
+    if (s.engine === 'sqlite')
+      s.availability?.push({
+        label: capability,
+        state: 'available',
+        action: 'Read from your database file copy.',
+      });
+  }
+  s.notices.push(
+    'Coverage: up to 50 query records and 100 objects per inventory; findings are not a complete database audit.',
+  );
   return s;
 }
 export async function explain(

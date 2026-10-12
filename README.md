@@ -8,10 +8,10 @@ All six engines require VS Code 1.101 or later (Node 22 extension host).
 
 ## Start in a minute
 
-1. Install the VSIX with **Extensions → ⋯ → Install from VSIX…**, or run `code --install-extension database-performance-analyzer-1.7.0.vsix`.
+1. Install **Database Performance Analyzer** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=DaniyalMusadiq.database-performance-analyzer). For offline installation, install the VSIX with **Extensions → ⋯ → Install from VSIX…**, or run `code --install-extension database-performance-analyzer-1.8.0.vsix`.
 2. Click the **database icon** in the left activity bar, then **Open dashboard**. You can also click **DB Performance** in the bottom status bar.
-3. Choose **Explore Demo**, **Detect Project Databases**, or **Add Connection**.
-4. Choose **Paste an address** for a provider URL, **Enter details** for a local database, or **Open SQLite file**. Server, port, name and security are grouped under optional settings. Standard ports, connection names and encryption settings are filled in automatically. Use **Find in my project** to detect URLs or separate `DB_CONNECTION`, `DB_HOST`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` settings in `.env` files. Native `PGHOST`, `MYSQL_HOST` and `REDIS_HOST` field families are also supported. A single detected connection is checked and saved directly; multiple candidates let you choose.
+3. Choose **Try with sample data**, **Detect Project Databases**, or **Add Connection**.
+4. Choose **I have a connection link** for a provider URL, **I have login details** for a local database, or **Open SQLite file**. Server is visible in the login-details form; port, display name and security are optional settings. Standard ports, connection names and encryption settings are filled in automatically. Use **Find in my project** to detect URLs or separate `DB_CONNECTION`, `DB_HOST`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` settings in `.env` files. Native `PGHOST`, `MYSQL_HOST` and `REDIS_HOST` field families are also supported. A single detected connection is checked and saved directly; multiple candidates let you choose.
 5. Click **Connect and show results**. The extension checks the database before saving and displays diagnostics immediately. Live updates are enabled by the checkbox on the form and pause when the dashboard is hidden. Use **Reconnect** on the home screen to return to your most recently used database. Re-adding the same address reuses your saved connection.
 
 Use a dedicated account with only the required read and monitoring privileges. Passwords and complete URLs are saved in VS Code's encrypted SecretStorage. Non-secret connection names and target labels are stored in extension global state. Under Remote SSH or containers, database access runs on the workspace host; `localhost` refers to that host.
@@ -67,7 +67,7 @@ SQL Server's SHOWPLAN connection is isolated to a single-connection pool and clo
 
 Detection reads up to 100 matching configuration/model files, each at most 1 MB, excluding common dependency/build directories. It recognizes literal URLs in `.env`, Prisma, compose and supported configuration files, plus Prisma, TypeORM, Sequelize, Mongoose, Knex, Drizzle, Django and database driver dependencies. It extracts Prisma model names, Django models, TypeORM entity class names and Mongoose model declarations using conservative text matching.
 
-Discovery never executes project code, evaluates environment substitutions or opens a network connection. Review and save a detected URL before it is used. Dynamic configuration, separate host/password fields, unusual file naming, JDBC URLs, embedded code and unsupported engines need manual setup. Detection may identify a dependency even when that framework is not actively used.
+Discovery inspects text without executing project code or evaluating environment substitutions. When invoked through connection setup, a single detected candidate is checked and saved; multiple candidates let you choose. Dynamic configuration, unsupported separate-field conventions, unusual file naming, JDBC URLs, embedded code and unsupported engines need manual setup. Detection may identify a dependency even when that framework is not actively used.
 
 ## Database permissions and setup
 
@@ -141,3 +141,21 @@ Hover over dashboard controls for tooltips, or expand **Connection guide & troub
 After first installation, a welcome notification offers **Open Dashboard** or **Try Demo**. The database icon in the left activity bar opens **Dashboard & connections**, which always has dashboard, add, detect and demo shortcuts, even before any connection is saved. There is also a dashboard button in the sidebar title and a **DB Performance** shortcut in the bottom status bar.
 
 Enable **Database Performance › Open Dashboard On Startup** in Settings to show the dashboard home screen on every launch. This is optional and does not open a database connection or start monitoring.
+
+## Simple experience in 1.8
+
+Simple view is the default. Try sample data without a database, connect using a link or login details, or copy a request for your administrator. Opening a project folder is optional. The glossary explains database terms.
+
+The first result distinguishes limited monitoring access, insufficient activity, and findings requiring attention. Diagnostic readiness shows available checks, missing access, configuration problems and unsupported features. Advanced view exposes all metrics, inventory tabs and SQL tools; the preference is remembered.
+
+Failed connections retain form entries in the current webview for retry. Credentials clear on success or closing setup, and are never persisted in webview state. Connection passwords are saved only in SecretStorage after a successful check.
+
+Findings include confidence, evidence and links to supporting information. After another successful check, query findings use valid matched interval counters when available; the displayed scope states exclusions. Frequent requests are considered alongside mean latency. Ambiguous identities and reset counters do not produce comparisons. PostgreSQL idle-transaction warnings use time since the state changed, configurable with `dbPerf.idleTransactionSeconds` (default 60). Fewer than five blocked sessions produce a warning; five or more produce a critical finding. Wait duration is not inferred from transaction age.
+
+Use **Check again after a change** to save a baseline and compare after a representative workload. Different workloads can invalidate causal conclusions. **Copy report for my developer** omits SQL and usernames; object names and collection notes remain, so review before sharing. Copying never sends anything.
+
+## Clearer setup and comparisons in 1.9
+
+Connection-link setup checks the scheme and shows the detected engine before connecting. Use the optional Show password or connection link checkbox to inspect a typo; credentials are masked again and cleared when setup closes or succeeds. Login details include engine-specific guidance. Switching methods ignores inactive fields, including an invalid port from the other method.
+
+A successful quiet comparison clears historical query warnings and reports insufficient recent activity. Only finite, nonnegative, consistent counters with matching query identity and text produce interval results. Unmatched or reset patterns remain excluded; a quiet interval is not proof that the entire database is healthy.

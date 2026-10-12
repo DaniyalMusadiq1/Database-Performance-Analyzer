@@ -8,8 +8,8 @@ import { Profile, Options, Snapshot } from './types';
 import { detectEngine, redactError, targetOf, validateUri, validateSql } from './security';
 import { inspectFiles } from './discovery';
 import { dashboardHtml } from './view';
-import { compareSnapshots } from './analysis';
-import { exportSnapshot } from './reports';
+import { recentFindings, compareSnapshots } from './analysis';
+import { administratorRequest, exportSnapshot } from './reports';
 import { SnapshotHistory, chartHistory } from './history';
 import { CancelledError, throwIfAborted } from './lifecycle';
 import { loadProfiles, SerialQueue } from './profiles';
@@ -164,6 +164,7 @@ export function activate(context: vscode.ExtensionContext) {
     const c = vscode.workspace.getConfiguration('dbPerf');
     return {
       timeoutMs: settingNumber(c.get('queryTimeoutMs'), 10000, 1000, 60000, true),
+      idleTransactionSeconds: settingNumber(c.get('idleTransactionSeconds'), 60, 5, 86400),
       slowQueryMs: settingNumber(c.get('slowQueryMs'), 100, 1, 3600000),
       wasmPath: vscode.Uri.joinPath(context.extensionUri, 'dist', 'sql-wasm.wasm').fsPath,
       sqliteWorkerPath: vscode.Uri.joinPath(context.extensionUri, 'dist', 'sqlite-worker.js')
@@ -216,7 +217,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (activeController.signal.aborted || disposed) return;
       return result;
     } catch (e) {
-      const message = redactError(e, uri);
+      const message = label === 'Refresh' ? connectionFailure(e, uri) : redactError(e, uri);
       if (label === 'Refresh') refreshError = message;
       post({ type: 'error', message, stale: label === 'Refresh' });
       output.appendLine(`${new Date().toISOString()} ${label}: ${message}`);
@@ -233,6 +234,8 @@ export function activate(context: vscode.ExtensionContext) {
     const id = selected;
     const s = await operation('Refresh', async (p, uri) => collect(p, uri, options()));
     if (!s || id !== selected) return;
+    if (current)
+      recentFindings(current, s, options().slowQueryMs, options().idleTransactionSeconds);
     current = s;
     refreshError = undefined;
     const max = settingNumber(
@@ -327,6 +330,16 @@ export function activate(context: vscode.ExtensionContext) {
                 post({ type: 'baselineCleared' });
                 if (current) post({ type: 'snapshot', snapshot: current, history: [] });
                 if (refreshError) post({ type: 'error', message: refreshError, stale: true });
+                break;
+              case 'copyHelp':
+                await vscode.env.clipboard.writeText(administratorRequest(getProfile()?.engine));
+                post({ type: 'helpCopied' });
+                break;
+              case 'copyReport':
+                if (current) {
+                  await vscode.env.clipboard.writeText(exportSnapshot(current, 'markdown', false));
+                  post({ type: 'reportCopied' });
+                }
                 break;
               case 'connect':
                 try {

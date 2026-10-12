@@ -2,7 +2,7 @@
   "name": "database-performance-analyzer",
   "displayName": "Database Performance Analyzer",
   "description": "Understand database performance across PostgreSQL, MySQL, SQL Server, SQLite, MongoDB and Redis directly in VS Code.",
-  "version": "1.7.0",
+  "version": "1.9.0",
   "publisher": "DaniyalMusadiq",
   "license": "MIT",
   "engines": {
@@ -192,6 +192,13 @@
           "type": "boolean",
           "default": false,
           "description": "Open the dashboard home screen when VS Code starts. Does not select a connection or start database monitoring."
+        },
+        "dbPerf.idleTransactionSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "maximum": 86400,
+          "description": "Warn when a PostgreSQL transaction has remained idle for this many seconds."
         }
       }
     }

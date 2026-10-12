@@ -1,5 +1,5 @@
 import { Finding, PlanNode, Snapshot } from './types';
-export function findingsFor(s: Snapshot, slowMs: number): Finding[] {
+export function findingsFor(s: Snapshot, slowMs: number, idleSeconds = 60): Finding[] {
   const f: Finding[] = [];
   const slow = s.queries.filter((q) => q.meanMs >= slowMs);
   if (slow.length)
@@ -16,18 +16,23 @@ export function findingsFor(s: Snapshot, slowMs: number): Finding[] {
   const blocked = s.sessions.filter((x) => x.blockers.length);
   if (blocked.length)
     f.push({
-      severity: 'critical',
+      severity: blocked.length >= 5 ? 'critical' : 'warning',
+      confidence: 'high',
+      section: 'sessions',
+      evidence: `${blocked.length} blocked sessions at capture time; wait duration is not measured.`,
       title: `${blocked.length} blocked session${blocked.length === 1 ? '' : 's'}`,
       detail: 'Another session is holding a conflicting lock.',
       action:
         'Review the blocker IDs and transaction age with the owner. This extension never terminates sessions.',
     });
-  const idle = s.sessions.filter((x) => x.state === 'idle in transaction' && x.ageSeconds > 60);
+  const idle = s.sessions.filter(
+    (x) => x.state === 'idle in transaction' && (x.idleSeconds ?? 0) > idleSeconds,
+  );
   if (idle.length)
     f.push({
       severity: 'warning',
       title: 'Long idle transactions',
-      detail: `${idle.length} transaction(s) have been idle for over a minute.`,
+      detail: `${idle.length} transaction(s) have been idle for over ${idleSeconds} seconds.`,
       action:
         'Ensure application transactions commit or roll back promptly; investigate abandoned connections.',
     });
@@ -62,6 +67,36 @@ export function findingsFor(s: Snapshot, slowMs: number): Finding[] {
       action:
         'Inspect query selectivity and plans. Sequential scans can be optimal; do not add indexes based only on counters.',
     });
+  const total = s.queries.reduce((sum, q) => sum + q.totalMs, 0);
+  const costly = s.queries.filter(
+    (q) => q.calls >= 100 && q.totalMs >= 1000 && q.totalMs >= total * 0.25,
+  );
+  if (s.queryMode !== 'samples' && costly.length)
+    f.push({
+      severity: 'info',
+      title: 'Frequently repeated requests consume time',
+      detail: `${costly.length} patterns each account for at least 25% of total time among the collected queries, with at least 100 calls.`,
+      action:
+        'Review repeated requests with your developer; batching or caching may help. Compare a representative interval first.',
+      section: 'queries',
+      confidence: 'medium',
+      evidence:
+        'Share of collected query time only; concurrent query times are not wall-clock utilization.',
+    });
+  for (const item of f) {
+    item.section ??= /transaction|session/i.test(item.title)
+      ? 'sessions'
+      : /index/i.test(item.title)
+        ? 'indexes'
+        : /tuple|scan/i.test(item.title)
+          ? 'tables'
+          : 'queries';
+    item.confidence ??= item.section === 'indexes' ? 'low' : 'medium';
+    item.evidence ??=
+      item.section === 'indexes'
+        ? 'Observation window and constraint purpose must be checked; zero reads is not proof that an index is unnecessary.'
+        : 'Based on available records at capture time; coverage may be incomplete.';
+  }
   return f;
 }
 export function postgresPlan(raw: unknown): PlanNode[] {
@@ -147,11 +182,26 @@ export function compareSnapshots(before: Snapshot, after: Snapshot) {
     reset,
     incompatible,
     queries: after.queries.map((q) => {
-      const old = before.queries.find((x) => x.id === q.id);
+      const matches = before.queries.filter((x) => x.id === q.id);
+      const old =
+        matches.length === 1 && after.queries.filter((x) => x.id === q.id).length === 1
+          ? matches[0]
+          : undefined;
       const dc = old ? q.calls - old.calls : null;
       const dt = old ? q.totalMs - old.totalMs : null;
       const valid =
-        !incompatible && !reset && dc !== null && dt !== null && dc >= 0 && dt >= 0 && elapsed > 0;
+        !incompatible &&
+        !reset &&
+        !!old &&
+        old.query === q.query &&
+        [old.calls, old.totalMs, q.calls, q.totalMs].every((n) => Number.isFinite(n) && n >= 0) &&
+        dc !== null &&
+        dt !== null &&
+        dc >= 0 &&
+        dt >= 0 &&
+        (dc > 0 || dt === 0) &&
+        Number.isFinite(elapsed) &&
+        elapsed > 0;
       return {
         id: q.id,
         query: q.query,
@@ -162,4 +212,45 @@ export function compareSnapshots(before: Snapshot, after: Snapshot) {
       };
     }),
   };
+}
+
+/** Prefer valid interval workload counters; never invent missing/reset deltas. */
+export function recentFindings(
+  before: Snapshot,
+  after: Snapshot,
+  slowMs: number,
+  idleSeconds = 60,
+): void {
+  const comparison = compareSnapshots(before, after);
+  if (comparison.incompatible || comparison.reset || comparison.elapsedSeconds <= 0) return;
+  const valid = comparison.queries.filter(
+    (q) => q.callsDelta !== null && q.callsDelta > 0 && q.intervalMeanMs !== null,
+  );
+  const matched = comparison.queries.filter((q) => q.callsDelta !== null);
+  if (!matched.length) return;
+  after.recentQueryCalls = valid.reduce((sum, q) => sum + q.callsDelta!, 0);
+  const interval = {
+    ...after,
+    queries: valid.map((q) => ({
+      id: q.id,
+      query: q.query,
+      calls: q.callsDelta!,
+      totalMs: q.totalMsDelta!,
+      meanMs: q.intervalMeanMs!,
+      rows: 0,
+    })),
+  };
+  after.findings = [
+    ...after.findings.filter((f) => f.section !== 'queries'),
+    ...findingsFor(interval, slowMs, idleSeconds)
+      .filter((f) => f.section === 'queries')
+      .map((f) => ({
+        ...f,
+        detail: f.detail.replace(
+          'These are cumulative server statistics, not timings from this refresh.',
+          'These are matched counter changes since the previous successful check.',
+        ),
+      })),
+  ];
+  after.observation = `Recent query findings cover ${valid.length} matched active patterns over ${Math.round(comparison.elapsedSeconds)} seconds. Missing, reset and inactive patterns are excluded. Other findings describe the current snapshot.`;
 }

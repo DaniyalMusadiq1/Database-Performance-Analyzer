@@ -67,6 +67,7 @@ export function demoSnapshot(slowMs = 100): Snapshot {
         id: '201',
         user: 'worker',
         state: 'idle in transaction',
+        idleSeconds: 120,
         ageSeconds: 145,
         wait: 'Client / ClientRead',
         query: 'UPDATE inventory SET quantity = 10 WHERE product_id = 42',

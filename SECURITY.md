@@ -30,3 +30,9 @@ Validate least-privilege permissions and TLS on real production-like instances f
 ## Legacy editor support
 
 VS Code 1.71.2 can use core engines and demo. Modern drivers keep their existing versions and are lazy-loaded after runtime checks; older hosts receive upgrade instructions for unavailable engines. Guided editing does not display the saved password; a blank replacement keeps it. Complete URLs and passwords stay in SecretStorage and never enter dashboard messages. Guided changes retain existing URL options.
+
+### 1.8.0 audit update (October 12, 2026)
+
+The locked dependency audit reports two moderate entries (`sprintf-js` and `tedious`) for the same formatter advisory, with no high or critical entries. npm now reports a fix available; this release retains the locked drivers and the tested bundled formatter mitigation. Dependency upgrades should re-evaluate and remove the transformation when an upstream fix is adopted.
+
+Setup credentials remain in the current form after a failed connection so users can correct a single field. They clear when setup closes or succeeds and are never written to webview persisted state. Copied reports omit query text and usernames by default but still contain metadata and collection notices.

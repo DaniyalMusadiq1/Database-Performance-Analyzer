@@ -7,7 +7,7 @@ import { inspectFiles } from '../src/discovery';
 test('Findings explain blockers, idle transactions and dead tuples', () => {
   const s = demoSnapshot();
   const f = findingsFor(s, 100);
-  assert.ok(f.some((x) => x.severity === 'critical'));
+  assert.ok(f.some((x) => x.title.includes('blocked session') && x.severity === 'warning'));
   assert.ok(f.some((x) => x.title === 'Dead tuple pressure'));
   assert.ok(f.some((x) => x.title === 'Long idle transactions'));
 });
@@ -99,4 +99,71 @@ test('Server identity changes detect restarts even when uptime has already surpa
   a.uptimeSeconds = 1;
   b.uptimeSeconds = 100;
   assert.equal(compareSnapshots(a, b).reset, true);
+});
+
+test('Idle transaction findings use idle duration, not transaction age', () => {
+  const s = demoSnapshot();
+  const idle = s.sessions.find((x) => x.state === 'idle in transaction')!;
+  idle.ageSeconds = 10000;
+  idle.idleSeconds = 2;
+  assert.ok(!findingsFor(s, 100).some((f) => f.title === 'Long idle transactions'));
+  idle.idleSeconds = 90;
+  assert.ok(findingsFor(s, 100, 60).some((f) => f.title === 'Long idle transactions'));
+  assert.ok(!findingsFor(s, 100, 120).some((f) => f.title === 'Long idle transactions'));
+});
+test('Ambiguous query identities never produce interval comparisons', () => {
+  const a = demoSnapshot(),
+    b = structuredClone(a);
+  a.timestamp = '2026-10-09T00:00:00Z';
+  b.timestamp = '2026-10-09T00:00:10Z';
+  b.queries.push({ ...b.queries[0] });
+  assert.equal(compareSnapshots(a, b).queries[0].callsDelta, null);
+});
+test('Recent findings use valid interval activity instead of historic mean latency', async () => {
+  const { recentFindings } = await import('../src/analysis.js');
+  const a = demoSnapshot(),
+    b = structuredClone(a);
+  a.timestamp = '2026-10-09T00:00:00Z';
+  b.timestamp = '2026-10-09T00:00:10Z';
+  b.queries[0].calls += 10;
+  b.queries[0].totalMs += 10;
+  recentFindings(a, b, 100);
+  assert.ok(b.observation?.includes('1 matched active patterns'));
+  assert.ok(!b.findings.some((f) => f.title.includes('expensive query')));
+  assert.ok(b.findings.some((f) => f.section === 'sessions'));
+});
+
+test('Quiet intervals clear historical query warnings without removing session findings', async () => {
+  const { recentFindings } = await import('../src/analysis.js');
+  const a = demoSnapshot(),
+    b = structuredClone(a);
+  a.timestamp = '2026-10-09T00:00:00Z';
+  b.timestamp = '2026-10-09T00:00:10Z';
+  recentFindings(a, b, 100);
+  assert.ok(b.observation?.includes('0 matched active patterns'));
+  assert.ok(!b.findings.some((f) => f.section === 'queries'));
+  assert.ok(b.findings.some((f) => f.section === 'sessions'));
+});
+test('Comparisons reject invalid counters, reused IDs and time changes without calls', () => {
+  const a = demoSnapshot();
+  a.timestamp = '2026-10-09T00:00:00Z';
+  for (const change of [
+    (q: (typeof a.queries)[number]) => {
+      q.calls = Infinity;
+    },
+    (q: (typeof a.queries)[number]) => {
+      q.totalMs = NaN;
+    },
+    (q: (typeof a.queries)[number]) => {
+      q.query = 'SELECT changed';
+    },
+    (q: (typeof a.queries)[number]) => {
+      q.totalMs += 10;
+    },
+  ]) {
+    const b = structuredClone(a);
+    b.timestamp = '2026-10-09T00:00:10Z';
+    change(b.queries[0]);
+    assert.equal(compareSnapshots(a, b).queries[0].callsDelta, null);
+  }
 });

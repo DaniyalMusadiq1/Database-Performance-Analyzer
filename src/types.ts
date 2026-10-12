@@ -26,6 +26,7 @@ export interface Session {
   user: string;
   state: string;
   ageSeconds: number;
+  idleSeconds?: number;
   wait: string;
   query: string;
   blockers: string[];
@@ -51,6 +52,9 @@ export interface Finding {
   title: string;
   detail: string;
   action: string;
+  confidence?: 'low' | 'medium' | 'high';
+  section?: 'queries' | 'sessions' | 'tables' | 'indexes';
+  evidence?: string;
 }
 export interface Snapshot {
   engine: Engine;
@@ -67,6 +71,9 @@ export interface Snapshot {
   indexes: IndexStat[];
   findings: Finding[];
   capabilities: string[];
+  availability?: DiagnosticAvailability[];
+  observation?: string;
+  recentQueryCalls?: number;
   notices: string[];
 }
 export interface PlanNode {
@@ -98,7 +105,13 @@ export interface Discovery {
   models: { name: string; source: string }[];
   notices: string[];
 }
+export interface DiagnosticAvailability {
+  label: string;
+  state: 'available' | 'unsupported' | 'permission-required' | 'not-configured' | 'failed';
+  action: string;
+}
 export interface Options {
+  idleTransactionSeconds?: number;
   timeoutMs: number;
   slowQueryMs: number;
   wasmPath: string;

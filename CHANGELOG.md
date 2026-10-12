@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.9.0 — 2026-10-12
+
+- Connection links now show the detected database type and reject unsupported schemes before connecting, without displaying credentials.
+- Add a show/hide credentials control that resets when setup closes or succeeds, and engine-specific guidance for login details.
+- Ignore hidden fields when switching setup methods, so a previously invalid port cannot block connection-link setup.
+- Clear historical slow-query warnings for valid quiet intervals and distinguish insufficient recent activity in the beginner summary.
+- Reject non-finite counters, changed query text under a reused ID, and elapsed-time changes without execution-count changes in comparisons.
+
+
+## 1.8.0
+
+- Default to a Simple dashboard with plain-language next steps, diagnostic readiness and an optional Advanced view.
+- Add connection-detail help, an administrator request, glossary, and private-by-default copied reports.
+- Show server entry directly; preserve setup fields after failures and clear credentials after success or close.
+- Add evidence and confidence to findings, recent workload analysis, repeated-query cost findings and guided before/after checks.
+- Measure PostgreSQL idle-state duration, configure its threshold, reduce transient-blocker severity and reject ambiguous comparison identities.
+- Distinguish missing permissions, missing configuration, failed diagnostics and unsupported features; clarify partial coverage.
+
 ## 1.7.0
 
 - Split setup into paste-address and simple-details modes with advanced fields collapsed.

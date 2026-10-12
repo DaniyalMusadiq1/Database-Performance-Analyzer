@@ -17,7 +17,7 @@
     ascending = false,
     refreshFailed = false;
   const tips = {
-    add: 'Choose local defaults, guided setup, project detection, a connection URL or a SQLite file.',
+    add: 'Use guided setup with a link, login details, project detection or a SQLite file.',
     'welcome-add': 'Start with a guided connection. Credentials are saved securely in VS Code.',
     detect: 'Inspect environment and ORM files without executing project code.',
     'project-detect': 'Find supported database URLs, frameworks and models in this workspace.',
@@ -74,6 +74,10 @@
     box.replaceChildren(el('div', text, 'empty'));
   };
   function tab(id) {
+    if (id !== 'overview' && $('view-mode').value === 'simple') {
+      $('view-mode').value = 'advanced';
+      applyView();
+    }
     if (!document.querySelector(`[data-tab="${CSS.escape(String(id))}"]`)) id = 'overview';
     document.querySelectorAll('.tab').forEach((x) => (x.hidden = x.id !== id));
     document.querySelectorAll('[data-tab]').forEach((x) => {
@@ -148,7 +152,40 @@
   }
   function finding(f) {
     const d = el('article', undefined, 'finding ' + f.severity);
-    d.append(el('h3', f.title), el('p', f.detail), el('p', f.action, 'action'));
+    const names = {
+      'Dead tuple pressure': 'Old row versions need attention',
+      'Long idle transactions': 'Some unfinished work has been left waiting',
+      'Indexes with no recorded reads': 'Some lookup indexes have no recorded use',
+    };
+    const descriptions = {
+      sessions:
+        'Some database work is waiting or unfinished. Ask your developer to check the affected requests and what is holding them up.',
+      tables:
+        'Stored data or the way it is searched may need attention. Ask your developer to review the evidence before making changes.',
+      indexes:
+        'These lookup structures may need review. Keep them until your developer has checked normal and occasional workloads.',
+      queries:
+        'Some application requests may be using more database time than expected. Ask your developer to inspect the most expensive requests.',
+    };
+    const title =
+      names[f.title] ||
+      f.title
+        .replace('expensive query pattern', 'slow request pattern')
+        .replace('blocked session', 'waiting request');
+    d.append(el('h3', title), el('p', descriptions[f.section] || f.action));
+    const details = el('details');
+    details.append(
+      el('summary', 'Evidence and technical next steps'),
+      el('p', f.detail),
+      el('p', f.action, 'action'),
+    );
+    if (f.confidence) details.append(el('p', `Confidence: ${f.confidence} · ${f.evidence || ''}`));
+    d.append(details);
+    if (f.section) {
+      const button = el('button', 'View supporting information');
+      button.onclick = () => tab(f.section);
+      d.append(button);
+    }
     return d;
   }
   function renderQueries() {
@@ -189,7 +226,10 @@
   function renderFindings() {
     if (!snapshot) return;
     const severity = $('finding-filter').value;
-    const findings = snapshot.findings.filter((f) => severity === 'all' || f.severity === severity);
+    const rank = { critical: 0, warning: 1, info: 2 };
+    const findings = snapshot.findings
+      .filter((f) => severity === 'all' || f.severity === severity)
+      .sort((a, b) => rank[a.severity] - rank[b.severity]);
     $('findings').replaceChildren(...findings.map(finding));
     if (!findings.length)
       empty(
@@ -202,6 +242,12 @@
   function syncControls() {
     const selected = profiles.find((p) => p.id === $('connection').value);
     $('interval').disabled = busy;
+    $('copy-report').disabled = busy || !snapshot;
+    $('guided-compare').disabled =
+      busy ||
+      !snapshot ||
+      snapshot.queryMode === 'samples' ||
+      !snapshot.capabilities.includes('queries');
     for (const id of [
       'setup-submit',
       'setup-detect',
@@ -314,6 +360,7 @@
         return d;
       }),
     );
+    renderGuidance();
     renderSummary();
     updateTabCounts(s);
     renderFindings();
@@ -491,6 +538,9 @@
     $('dashboard').hidden = !shownId;
     $('setup-password').value = '';
     $('setup-uri').value = '';
+    $('setup-uri').setCustomValidity('');
+    $('setup-show-password').checked = false;
+    $('setup-show-password').onchange();
   };
   $('setup-detect').onclick = () => send('detect');
   $('setup-file').onclick = () => send('sqliteFile');
@@ -503,11 +553,49 @@
     $('setup-address').setAttribute('aria-pressed', String(useAddress));
     $('setup-local').setAttribute('aria-pressed', String(!useAddress));
     $('setup-uri').required = useAddress;
+    $('setup-uri').disabled = !useAddress;
+    for (const key of ['host', 'engine', 'database', 'user', 'password', 'port'])
+      $('setup-' + key).disabled = useAddress;
+    $('setup-port-label').hidden = useAddress;
+    $('setup-field-help').hidden = useAddress;
+    $('setup-host').required = !useAddress;
     $('setup-hint').textContent = useAddress
       ? 'Paste once and connect. No database type, host or port selection needed.'
-      : 'Local server and port are filled in. Enter the account your database uses.';
+      : 'Enter your server address and account details. Under SSH or containers, localhost is the workspace computer.';
     $('setup-' + (useAddress ? 'uri' : 'engine')).focus();
   }
+  $('setup-show-password').onchange = () => {
+    for (const key of ['password', 'uri'])
+      $('setup-' + key).type = $('setup-show-password').checked ? 'text' : 'password';
+  };
+  $('setup-uri').oninput = () => {
+    const value = $('setup-uri').value.trim();
+    const scheme = value.match(/^([a-z+]+):\/\//i)?.[1].toLowerCase();
+    const names = {
+      postgres: 'PostgreSQL',
+      postgresql: 'PostgreSQL',
+      mysql: 'MySQL',
+      mariadb: 'MariaDB',
+      mssql: 'SQL Server',
+      sqlserver: 'SQL Server',
+      mongodb: 'MongoDB',
+      'mongodb+srv': 'MongoDB Atlas / SRV',
+      redis: 'Redis',
+      rediss: 'Redis with TLS',
+    };
+    const supported = !!names[scheme];
+    $('setup-uri').setCustomValidity(
+      value && !supported
+        ? 'Paste a supported database connection link, including its scheme (for example postgresql://).'
+        : '',
+    );
+    $('setup-link-check').textContent = !value
+      ? 'Paste the complete connection link from your provider.'
+      : supported
+        ? names[scheme] +
+          ' link detected. Login and monitoring access will be checked when you connect.'
+        : 'This is not a supported database link. Use login details for separate server and account fields.';
+  };
   $('setup-address').onclick = () => setupMode(true);
   $('setup-local').onclick = () => setupMode(false);
   const defaults = {
@@ -521,6 +609,17 @@
     const [port, database] = defaults[$('setup-engine').value];
     $('setup-port').value = port;
     $('setup-database').value = database;
+    $('setup-field-help').textContent = {
+      postgres:
+        'Database defaults to postgres. Use your monitoring account; your application may use a different database.',
+      mysql: 'Enter your application database name and monitoring account. Standard port: 3306.',
+      sqlserver:
+        'Database defaults to master. Enter your application database and SQL login. Standard port: 1433.',
+      mongodb:
+        'For Atlas, SRV or authentication options, use your provider’s connection link. Login details use the database entered here for authentication.',
+      redis:
+        'Database is a numeric index, usually 0. Leave username empty for password-only authentication.',
+    }[$('setup-engine').value];
     $('setup-user').value = {
       postgres: 'postgres',
       mysql: 'root',
@@ -547,10 +646,10 @@
       fields[key] = $('setup-' + key).value;
     if (!addressMode) fields.uri = '';
     send('connect', { ...fields, monitor: $('setup-monitor').checked });
-    $('setup-password').value = '';
-    $('setup-uri').value = '';
+    $('setup-error-details').hidden = true;
     $('setup-status').classList.remove('error');
-    $('setup-status').textContent = 'Checking your connection…';
+    $('setup-status').textContent =
+      'Checking login and collecting available diagnostics… You can cancel above.';
   };
   $('detect').onclick = $('project-detect').onclick = () => send('detect');
   $('demo').onclick = () => send('demo');
@@ -591,9 +690,22 @@
     if (m.type === 'setup') {
       showSetup();
     } else if (m.type === 'setupError') {
-      $('setup-status').textContent = m.message;
+      const lines = String(m.message).split('\n');
+      $('setup-status').textContent = lines.length > 1 ? lines.at(-1) : m.message;
+      $('setup-error-technical').textContent = m.message;
+      $('setup-error-details').hidden = false;
       $('setup-status').classList.add('error');
+    } else if (m.type === 'helpCopied' || m.type === 'reportCopied') {
+      $('copy-status').textContent =
+        m.type === 'helpCopied'
+          ? 'Administrator request copied. Nothing was sent.'
+          : 'Report copied. Review before sharing.';
     } else if (m.type === 'connected') {
+      $('setup-password').value = '';
+      $('setup-uri').value = '';
+      $('setup-uri').setCustomValidity('');
+      $('setup-show-password').checked = false;
+      $('setup-show-password').onchange();
       $('setup').hidden = true;
       $('setup-status').textContent = 'Connected successfully.';
     } else if (m.type === 'profiles') {
@@ -746,9 +858,11 @@
       tab('plan');
     } else if (m.type === 'baselineState') {
       baseline = m.timestamp;
+      if (snapshot) renderGuidance();
       syncControls();
     } else if (m.type === 'baselineCleared') {
       baseline = null;
+      if (snapshot) renderGuidance();
       $('comparison').replaceChildren();
       syncControls();
     } else if (m.type === 'comparison') {
@@ -797,7 +911,100 @@
       tab('project');
     }
   });
+
+  function applyView() {
+    const simple = $('view-mode').value === 'simple';
+    document.body.classList.toggle('simple-view', simple);
+    vscode.setState({ ...vscode.getState(), mode: $('view-mode').value });
+    if (simple) tab('overview');
+  }
+  $('view-mode').value = state.mode || 'simple';
+  $('view-mode').onchange = applyView;
+  const help = () => {
+    $('connection-assistance').hidden = false;
+    $('connection-assistance').scrollIntoView({ block: 'start' });
+    $('copy-help').focus();
+  };
+  $('welcome-help').onclick = $('setup-help').onclick = $('readiness-help').onclick = help;
+  $('help-close').onclick = () => {
+    $('connection-assistance').hidden = true;
+  };
+  $('copy-help').onclick = () => send('copyHelp');
+  $('copy-report').onclick = () => send('copyReport');
+  $('guided-compare').onclick = () => {
+    if (!snapshot || busy) return;
+    if (!baseline) {
+      send('baseline');
+      $('next-description').textContent =
+        'Before-change snapshot saved. After your developer makes a change, use the application normally, then click Check again. Similar workloads give more useful comparisons.';
+    } else {
+      send('refresh');
+      tab('overview');
+    }
+  };
+  function renderGuidance() {
+    const s = snapshot;
+    const availability = s.availability || [];
+    const limited = availability.some((a) => !['available', 'unsupported'].includes(a.state));
+    const active = s.recentQueryCalls === undefined ? s.queries.length > 0 : s.recentQueryCalls > 0;
+    $('next-title').textContent =
+      s.engine === 'demo'
+        ? 'Sample results — your database is not connected'
+        : limited
+          ? 'Connected with limited visibility'
+          : s.findings.length
+            ? 'Some checks need attention'
+            : !active && s.engine !== 'sqlite'
+              ? 'Not enough query activity to assess performance'
+              : 'No issues detected by the available checks';
+    $('next-description').textContent = baseline
+      ? 'Before-change snapshot saved. After a change, use the application normally and click Check again. Compare similar workloads; differences alone do not prove that a change helped.'
+      : limited
+        ? 'Some diagnostics need administrator help. You can use the available results now; missing data does not mean the database is healthy.'
+        : s.findings.length
+          ? 'Start with the findings below. Each explains the evidence and a next step. Copy a report if a developer needs to help.'
+          : 'Use your application normally and check again. These checks are advisory and do not cover every possible issue.';
+    $('observation').textContent =
+      s.observation ||
+      (s.queryMode === 'samples'
+        ? 'Query information contains individual samples, not a complete workload history.'
+        : 'First-check query totals are historical. Refresh again to assess matched recent activity.');
+    const labels = {
+      available: 'Available',
+      unsupported: 'Not collected for this engine',
+      'permission-required': 'Monitoring access needed',
+      'not-configured': 'Setup needed',
+      failed: 'Check failed',
+    };
+    $('readiness').replaceChildren(
+      ...availability
+        .filter((a) => a.state !== 'unsupported')
+        .map((a) => {
+          const row = el('p');
+          row.append(
+            el('strong', `${a.label}: ${labels[a.state] || a.state}. `),
+            document.createTextNode(a.action),
+          );
+          return row;
+        }),
+    );
+    const unsupported = availability.filter((a) => a.state === 'unsupported');
+    if (unsupported.length)
+      $('readiness').append(
+        el('p', 'Not collected for this engine: ' + unsupported.map((a) => a.label).join(', ')),
+      );
+    if (!availability.length)
+      $('readiness').append(el('p', 'Available sections: ' + s.capabilities.join(', ')));
+    $('guided-compare').disabled =
+      busy || s.queryMode === 'samples' || !s.capabilities.includes('queries');
+    $('guided-compare').textContent = baseline
+      ? 'Check again and compare'
+      : 'Check again after a change';
+  }
+  applyView();
   syncControls();
-  tab(state.tab || 'overview');
+  tab(state.mode === 'advanced' ? state.tab || 'overview' : 'overview');
+  // Restore advanced navigation only when explicitly selected.
+
   send('ready');
 })();
