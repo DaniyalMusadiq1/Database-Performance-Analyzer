@@ -6,12 +6,23 @@ export function inspectFiles(files: { path: string; text: string }[]): Discovery
   const seen = new Set<string>();
   for (const file of files) {
     if (file.text.length > 1024 * 1024) continue;
-    const urls: string[] =
-      file.text.match(
-        /(?:postgres(?:ql)?|mysql|mariadb|sqlserver|mssql|mongodb(?:\+srv)?|rediss?):\/\/[^\s"'`<>]+|(?:sqlite|file):\/\/\/[^\s"'`<>]+/gi,
-      ) ?? [];
+    const urls: string[] = [];
+    // Ignore comments and JDBC URLs: stripping the JDBC prefix can silently change
+    // driver options and authentication semantics.
+    for (const line of file.text.split(/\r?\n/)) {
+      if (/^\s*(?:#|\/\/|;)/.test(line)) continue;
+      const pattern =
+        /(?:postgres(?:ql)?|mysql|mariadb|sqlserver|mssql|mongodb(?:\+srv)?|rediss?):\/\/[^\s"'`<>]+|(?:sqlite|file):\/\/\/[^\s"'`<>]+/gi;
+      for (const match of line.matchAll(pattern)) {
+        if (/jdbc:$/i.test(line.slice(0, match.index))) {
+          result.notices.push(`JDBC address in ${file.path} needs manual connection setup.`);
+          continue;
+        }
+        urls.push(match[0]);
+      }
+    }
     // Laravel and other dotenv applications commonly use separate connection fields.
-    if (/(?:^|\/)\.env(?:\.|$)/.test(file.path)) {
+    if (/(?:^|[\\/])\.env(?:\.|$)/.test(file.path)) {
       const env: Record<string, string> = {};
       for (const match of file.text.matchAll(
         /^\s*(?:export\s+)?([A-Z_][A-Z_0-9]*)\s*=\s*(.*)$/gm,
@@ -43,7 +54,7 @@ export function inspectFiles(files: { path: string; text: string }[]): Discovery
         user?: string;
         password?: string;
       }[] = [];
-      const engine = engines[env.DB_CONNECTION || env.DB_ENGINE || ''];
+      const engine = engines[(env.DB_CONNECTION || env.DB_ENGINE || '').toLowerCase()];
       if (engine && env.DB_HOST)
         configs.push({
           engine,
@@ -53,14 +64,14 @@ export function inspectFiles(files: { path: string; text: string }[]): Discovery
           user: env.DB_USERNAME || env.DB_USER,
           password: env.DB_PASSWORD,
         });
-      if (env.PGHOST)
+      if (env.PGHOST || env.POSTGRES_HOST)
         configs.push({
           engine: 'postgres',
-          host: env.PGHOST,
-          port: env.PGPORT,
-          database: env.PGDATABASE,
-          user: env.PGUSER,
-          password: env.PGPASSWORD,
+          host: env.PGHOST || env.POSTGRES_HOST,
+          port: env.PGHOST ? env.PGPORT : env.POSTGRES_PORT,
+          database: env.PGHOST ? env.PGDATABASE : env.POSTGRES_DB,
+          user: env.PGHOST ? env.PGUSER : env.POSTGRES_USER,
+          password: env.PGHOST ? env.PGPASSWORD : env.POSTGRES_PASSWORD,
         });
       if (env.MYSQL_HOST)
         configs.push({
@@ -70,6 +81,15 @@ export function inspectFiles(files: { path: string; text: string }[]): Discovery
           database: env.MYSQL_DATABASE,
           user: env.MYSQL_USER,
           password: env.MYSQL_PASSWORD,
+        });
+      if (env.MONGODB_HOST || env.MONGO_HOST)
+        configs.push({
+          engine: 'mongodb',
+          host: env.MONGODB_HOST || env.MONGO_HOST,
+          port: env.MONGODB_PORT || env.MONGO_PORT,
+          database: env.MONGODB_DATABASE || env.MONGO_DATABASE,
+          user: env.MONGODB_USER,
+          password: env.MONGODB_PASSWORD,
         });
       if (env.REDIS_HOST)
         configs.push({
@@ -169,6 +189,7 @@ export function inspectFiles(files: { path: string; text: string }[]): Discovery
     }
   }
   result.frameworks = [...new Set(result.frameworks)];
+  result.notices = [...new Set(result.notices)];
   result.models = result.models.slice(0, 200);
   if (!result.connections.length)
     result.notices.push(

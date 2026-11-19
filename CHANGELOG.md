@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.1
+
+- Broaden project discovery to Spring and .NET configuration and PostgreSQL and MongoDB environment fields.
+- Ignore commented and JDBC URLs, avoid mixing PostgreSQL credential families, and support Windows dotenv paths.
+- Warn when discovery reaches its file limit.
+
 ## 1.9.0 — 2026-10-12
 
 - Connection links now show the detected database type and reject unsupported schemes before connecting, without displaying credentials.

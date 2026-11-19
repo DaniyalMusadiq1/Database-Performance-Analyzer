@@ -887,7 +887,7 @@ export function activate(context: vscode.ExtensionContext) {
       },
       async (_progress, token) => {
         const uris = await vscode.workspace.findFiles(
-          '**/{package.json,*.prisma,.env,.env.*,docker-compose*.yml,docker-compose*.yaml,compose*.yml,compose*.yaml,settings.py,models.py,*entity.ts,*model.ts,*model.js,drizzle.config.ts,knexfile.js}',
+          '**/{package.json,*.prisma,.env,.env.*,docker-compose*.yml,docker-compose*.yaml,compose*.yml,compose*.yaml,settings.py,models.py,*entity.ts,*model.ts,*model.js,drizzle.config.ts,knexfile.js,application.properties,application.yml,application.yaml,application-*.properties,application-*.yml,application-*.yaml,appsettings.json,appsettings.*.json}',
           '**/{node_modules,.git,dist,build,venv,.venv,vendor}/**',
           100,
           token,
@@ -914,6 +914,10 @@ export function activate(context: vscode.ExtensionContext) {
         }
         if (token.isCancellationRequested) return;
         const result = inspectFiles(files);
+        if (uris.length === 100)
+          result.notices.push(
+            'Discovery reached its 100-file limit; some project files may not have been inspected.',
+          );
         post({
           type: 'discovery',
           ...result,
