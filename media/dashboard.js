@@ -115,6 +115,9 @@
           .includes(filter),
       ),
     );
+    const count = $(id.replace('-table', '-count'));
+    if (count && id !== 'query-table')
+      count.textContent = `${rows.length} of ${tableData.get(id).rows.length} available records`;
     const box = $(id);
     if (!rows.length) {
       empty(
@@ -659,6 +662,26 @@
   $('clear-history').onclick = () => send('clearHistory');
   $('clear-baseline').onclick = () => send('clearBaseline');
   $('finding-filter').onchange = renderFindings;
+  $('clear-filters').onclick = () => {
+    for (const id of ['query', 'session', 'table', 'index']) $(id + '-filter').value = '';
+    $('slow-only').checked = false;
+    $('finding-filter').value = 'all';
+    renderQueries();
+    renderFindings();
+    for (const id of ['session', 'table', 'index']) {
+      const data = tableData.get(id + '-table');
+      if (data) table(id + '-table', data.headers, data.rows);
+    }
+  };
+  for (const id of ['query', 'session', 'table', 'index']) {
+    $(id + '-filter').addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && event.currentTarget.value) {
+        event.preventDefault();
+        event.currentTarget.value = '';
+        event.currentTarget.dispatchEvent(new Event('input'));
+      }
+    });
+  }
   for (const id of ['session', 'table', 'index']) {
     $(id + '-filter').oninput = () => {
       const data = tableData.get(id + '-table');
@@ -747,7 +770,7 @@
         $('snapshot-summary').replaceChildren();
         $('trend-stats').textContent = '';
         updateTabCounts({ queries: [], sessions: [], tables: [], indexes: [] });
-        $('query-count').textContent = '';
+        for (const id of ['query', 'session', 'table', 'index']) $(id + '-count').textContent = '';
         $('sql').value = '';
         for (const id of [
           'metrics',

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.0
+
+- Show filtered and total record counts for sessions, tables and indexes.
+- Reset dashboard filters in one click and clear search fields with Escape.
+- Leave live monitoring off until explicitly selected during connection setup.
+
 ## 1.9.1
 
 - Broaden project discovery to Spring and .NET configuration and PostgreSQL and MongoDB environment fields.

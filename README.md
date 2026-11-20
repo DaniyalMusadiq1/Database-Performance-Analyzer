@@ -12,7 +12,7 @@ All six engines require VS Code 1.101 or later (Node 22 extension host).
 2. Click the **database icon** in the left activity bar, then **Open dashboard**. You can also click **DB Performance** in the bottom status bar.
 3. Choose **Try with sample data**, **Detect Project Databases**, or **Add Connection**.
 4. Choose **I have a connection link** for a provider URL, **I have login details** for a local database, or **Open SQLite file**. Server is visible in the login-details form; port, display name and security are optional settings. Standard ports, connection names and encryption settings are filled in automatically. Use **Find in my project** to detect URLs or separate `DB_CONNECTION`, `DB_HOST`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` settings in `.env` files. Native `PGHOST`, `POSTGRES_HOST`, `MYSQL_HOST`, `MONGODB_HOST` and `REDIS_HOST` field families are also supported. A single detected connection is checked and saved directly; multiple candidates let you choose.
-5. Click **Connect and show results**. The extension checks the database before saving and displays diagnostics immediately. Live updates are enabled by the checkbox on the form and pause when the dashboard is hidden. Use **Reconnect** on the home screen to return to your most recently used database. Re-adding the same address reuses your saved connection.
+5. Click **Connect and show results**. The extension checks the database before saving and displays diagnostics immediately. Live updates can be enabled with the checkbox on the form and pause when the dashboard is hidden. Use **Reconnect** on the home screen to return to your most recently used database. Re-adding the same address reuses your saved connection.
 
 Use a dedicated account with only the required read and monitoring privileges. Passwords and complete URLs are saved in VS Code's encrypted SecretStorage. Non-secret connection names and target labels are stored in extension global state. Under Remote SSH or containers, database access runs on the workspace host; `localhost` refers to that host.
 
@@ -159,3 +159,7 @@ Use **Check again after a change** to save a baseline and compare after a repres
 Connection-link setup checks the scheme and shows the detected engine before connecting. Use the optional Show password or connection link checkbox to inspect a typo; credentials are masked again and cleared when setup closes or succeeds. Login details include engine-specific guidance. Switching methods ignores inactive fields, including an invalid port from the other method.
 
 A successful quiet comparison clears historical query warnings and reports insufficient recent activity. Only finite, nonnegative, consistent counters with matching query identity and text produce interval results. Unmatched or reset patterns remain excluded; a quiet interval is not proof that the entire database is healthy.
+
+### Dashboard controls in 1.10
+
+Record counts show the filtered and total sessions, tables and indexes. In the Queries tab, **Clear all filters** resets dashboard searches and finding severity; press Escape in a search field to clear it. Live monitoring starts only when selected during setup.

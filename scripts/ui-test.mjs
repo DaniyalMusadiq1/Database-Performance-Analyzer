@@ -79,6 +79,8 @@ try {
   assert.equal(await page.inputValue('#setup-port'), '3306');
   await page.fill('#setup-user', 'test-user');
   await page.fill('#setup-password', 'test-password');
+  assert.equal(await page.locator('#setup-monitor').isChecked(), false);
+  await page.check('#setup-monitor');
   await page.click('#setup-submit');
   assert.ok(
     await page.evaluate(() =>
@@ -283,7 +285,14 @@ try {
 
   await page.fill('#query-filter', 'inventory');
   assert.equal(await page.locator('#query-table tbody tr').count(), 1);
-  await page.fill('#query-filter', '');
+  await page.locator('#query-filter').press('Escape');
+  assert.equal(await page.locator('#query-table tbody tr').count(), 3);
+  await page.fill('#query-filter', 'inventory');
+  await page.check('#slow-only');
+  await page.click('#clear-filters');
+  assert.equal(await page.inputValue('#query-filter'), '');
+  assert.equal(await page.locator('#slow-only').isChecked(), false);
+  assert.equal(await page.locator('#query-table tbody tr').count(), 3);
   await page.locator('#query-table button').first().click();
   assert.ok((await page.inputValue('#sql')).startsWith('SELECT customer_id'));
   await page.click('#explain');
